@@ -1,0 +1,1 @@
+# crd-sakura-simple-monitor
