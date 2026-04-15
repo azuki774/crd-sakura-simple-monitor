@@ -1,0 +1,36 @@
+name: Nix CI
+
+on:
+  pull_request:
+    paths:
+      - "flake.nix"
+      - "**/*.nix"
+      - "flake.lock"
+      - ".github/workflows/nix-ci.yml"
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v21
+
+      - name: Show flake outputs
+        run: nix flake show .
+
+      - name: Check flake
+        run: nix flake check .
+
+      - name: Verify dev shell tools
+        run: |
+          nix develop .#default --command bash -lc '
+            go version
+            kubebuilder version
+            kubectl version --client
+          '
