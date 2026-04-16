@@ -1,0 +1,32 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - monitoring.k8s.azuki.blue
+  resources:
+  - sakurasimplemonitors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - monitoring.k8s.azuki.blue
+  resources:
+  - sakurasimplemonitors/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - monitoring.k8s.azuki.blue
+  resources:
+  - sakurasimplemonitors/status
+  verbs:
+  - get
+  - patch
+  - update

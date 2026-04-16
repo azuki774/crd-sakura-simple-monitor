@@ -9,13 +9,15 @@ This repository is currently design-first and documentation-heavy. Keep top-leve
 When implementation starts, place runtime code under dedicated source directories instead of expanding the root further. Keep new contributor-facing docs in `docs/`.
 
 ## Build, Test, and Development Commands
-There is no project-local build or test pipeline yet. Until the controller scaffold is added, use lightweight validation commands before opening a PR:
+The repository now includes a Kubebuilder-based scaffold. Use these commands before opening a PR:
 
+- `make manifests`: regenerate CRDs and RBAC manifests
+- `make generate`: regenerate deepcopy and object code
+- `make test`: run envtest-based controller tests
+- `make build`: build the manager binary
 - `git diff --check`: catch trailing spaces and malformed patches
 - `git status --short`: confirm intended file scope
 - `git log --oneline -5`: review recent commit style
-
-If you introduce a real build or test command later, document it in `README.md` and update this file in the same change.
 
 ## Coding Style & Naming Conventions
 Follow the repository's existing style:
@@ -28,13 +30,14 @@ Follow the repository's existing style:
 Use examples and bullet lists when they improve scanability, but keep prose direct.
 
 ## Testing Guidelines
-Because no automated tests exist yet, every change should include a manual review pass:
+Every change should include automated and manual review as appropriate:
 
+- run `make test` when Go code or controller behavior changes
 - verify links, headings, and code fences
-- confirm terminology stays consistent across `README.md`, `SPEC.md`, and `PLAN.md`
+- confirm terminology stays consistent across `README.md` and implementation/config files
 - for process docs, check that commands and paths match the current repository layout
 
-When code is added, place tests next to the relevant package or under a dedicated `tests/` directory and document the exact test command here.
+Place Go tests next to the relevant package or under `test/` for envtest/e2e coverage.
 
 ## Commit & Pull Request Guidelines
 Use Conventional Commits. This repository already documents that convention in `docs/agents/conventional-commit-writer.md`. Typical examples:
