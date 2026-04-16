@@ -11,10 +11,11 @@
       pkgs = import nixpkgs {
         inherit system;
       };
+      staticPkgs = pkgs.pkgsStatic;
     in {
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
-          go_1_24
+          staticPkgs.go_1_24
           kubebuilder
           kubectl
           git

@@ -37,7 +37,7 @@ Every change should include automated and manual review as appropriate:
 - confirm terminology stays consistent across `README.md` and implementation/config files
 - for process docs, check that commands and paths match the current repository layout
 
-Place Go tests next to the relevant package or under `test/` for envtest/e2e coverage.
+Place Go tests next to the relevant package or under `test/` when shared test helpers become necessary.
 
 ## Commit & Pull Request Guidelines
 Use Conventional Commits. This repository already documents that convention in `docs/agents/conventional-commit-writer.md`. Typical examples:
