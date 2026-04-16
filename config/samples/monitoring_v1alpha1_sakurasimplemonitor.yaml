@@ -1,0 +1,22 @@
+apiVersion: monitoring.k8s.azuki.blue/v1alpha1
+kind: SakuraSimpleMonitor
+metadata:
+  labels:
+    app.kubernetes.io/name: crd-sakura-simple-monitor
+    app.kubernetes.io/managed-by: kustomize
+  name: sakurasimplemonitor-sample
+spec:
+  target: example.com
+  healthCheck:
+    protocol: https
+    port: 443
+    path: /healthz
+    expectedStatus: 200
+    timeoutSeconds: 10
+  interval: 1
+  retryInterval: 20
+  notifications:
+    webhookURL: https://example.com/webhook
+    message: example.com health check failed
+    repeatInterval: 7200
+  description: example endpoint
