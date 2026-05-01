@@ -92,10 +92,38 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+			result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
+
+			resource := &monitoringv1alpha1.SakuraSimpleMonitor{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+			Expect(resource.Status.MonitorID).To(BeEmpty())
+			Expect(resource.Status.Health).To(BeEmpty())
+			Expect(resource.Status.ObservedGeneration).To(BeZero())
+			Expect(resource.Status.Conditions).To(BeEmpty())
+			Expect(resource.Status.LastSyncedAt).To(BeNil())
+		})
+
+		It("should ignore missing resources", func() {
+			By("Reconciling a missing resource")
+			controllerReconciler := &SakuraSimpleMonitorReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "missing-resource",
+					Namespace: "default",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
 		})
 	})
 })
