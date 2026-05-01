@@ -85,17 +85,37 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 			By("Cleanup the specific resource instance SakuraSimpleMonitor")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &SakuraSimpleMonitorReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+		DescribeTable("should reconcile without side effects",
+			func(name string, expectResource bool) {
+				controllerReconciler := &SakuraSimpleMonitorReconciler{
+					Client: k8sClient,
+					Scheme: k8sClient.Scheme(),
+				}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
+				result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      name,
+						Namespace: "default",
+					},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Requeue).To(BeFalse())
+				Expect(result.RequeueAfter).To(BeZero())
+
+				if !expectResource {
+					return
+				}
+
+				resource := &monitoringv1alpha1.SakuraSimpleMonitor{}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+				Expect(resource.Status.MonitorID).To(BeEmpty())
+				Expect(resource.Status.Health).To(BeEmpty())
+				Expect(resource.Status.ObservedGeneration).To(BeZero())
+				Expect(resource.Status.Conditions).To(BeEmpty())
+				Expect(resource.Status.LastSyncedAt).To(BeNil())
+			},
+			Entry("existing resource", resourceName, true),
+			Entry("missing resource", "missing-resource", false),
+		)
 	})
 })

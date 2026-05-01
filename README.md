@@ -2,7 +2,9 @@
 
 Kubernetes CRD / Controller で、さくらのクラウドのシンプル監視を宣言的に管理するためのプロジェクトです。
 
-現時点では、Kubebuilder ベースの operator scaffold と `SakuraSimpleMonitor` API の初期型定義を含みます。Go 型を正本とし、CRD の `openAPIV3Schema` は `controller-gen` で生成する前提です。
+現時点では、Kubebuilder ベースの no-op operator と `SakuraSimpleMonitor` API の初期型定義を含みます。Go 型を正本とし、CRD の `openAPIV3Schema` は `controller-gen` で生成する前提です。
+
+manager プロセスは起動し、`SakuraSimpleMonitor` リソースを watch します。現在の reconcile は対象リソースを取得してログを出力するだけで、さくらのクラウド API 呼び出し、外部リソース作成、`status` 更新、finalizer 処理はまだ行いません。
 
 ## 主なディレクトリ
 
