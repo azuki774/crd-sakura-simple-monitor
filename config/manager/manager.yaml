@@ -65,6 +65,17 @@ spec:
           - --health-probe-bind-address=:8081
         image: controller:latest
         name: manager
+        env:
+        - name: SAKURACLOUD_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: sakuracloud-api
+              key: access-token
+        - name: SAKURACLOUD_ACCESS_TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: sakuracloud-api
+              key: access-token-secret
         ports: []
         securityContext:
           allowPrivilegeEscalation: false
