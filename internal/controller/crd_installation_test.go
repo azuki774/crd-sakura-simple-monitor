@@ -56,15 +56,36 @@ var _ = Describe("SakuraSimpleMonitor CRD installation", func() {
 			wantError     bool
 			wantErrorText string
 		}{
+			// 正常系: 最小限の有効な CR が API server に受理されることを確認する。
 			{
 				name:    "accepts a valid https monitor",
 				monitor: newSakuraSimpleMonitorObject("crd-installation-valid", "https"),
 			},
+			// protocol は SakuraCloud シンプル監視で初回対応する http/https だけに制限する。
 			{
 				name:          "rejects an unsupported health check protocol",
 				monitor:       newSakuraSimpleMonitorObject("crd-installation-invalid-protocol", "ftp"),
 				wantError:     true,
 				wantErrorText: "ftp",
+			},
+			// retryInterval は SakuraCloud API の下限に合わせ、無効な CR を API server 側で拒否する。
+			{
+				name: "rejects a retry interval below the SakuraCloud API minimum",
+				monitor: newSakuraSimpleMonitorObjectWithSpecMutation("crd-installation-invalid-retry-interval", "https", func(spec map[string]interface{}) {
+					spec["retryInterval"] = int64(1)
+				}),
+				wantError:     true,
+				wantErrorText: "retryInterval",
+			},
+			// repeatInterval も SakuraCloud API の下限に合わせ、reconcile 前に schema validation で弾く。
+			{
+				name: "rejects a notification repeat interval below the SakuraCloud API minimum",
+				monitor: newSakuraSimpleMonitorObjectWithSpecMutation("crd-installation-invalid-repeat-interval", "https", func(spec map[string]interface{}) {
+					notifications := spec["notifications"].(map[string]interface{})
+					notifications["repeatInterval"] = int64(1)
+				}),
+				wantError:     true,
+				wantErrorText: "repeatInterval",
 			},
 		}
 
@@ -99,6 +120,10 @@ var _ = Describe("SakuraSimpleMonitor CRD installation", func() {
 })
 
 func newSakuraSimpleMonitorObject(name, protocol string) *unstructured.Unstructured {
+	return newSakuraSimpleMonitorObjectWithSpecMutation(name, protocol, nil)
+}
+
+func newSakuraSimpleMonitorObjectWithSpecMutation(name, protocol string, mutateSpec func(map[string]interface{})) *unstructured.Unstructured {
 	monitor := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "monitoring.k8s.azuki.blue/v1alpha1",
 		"kind":       "SakuraSimpleMonitor",
@@ -125,6 +150,9 @@ func newSakuraSimpleMonitorObject(name, protocol string) *unstructured.Unstructu
 			"description": "CRD installation test resource",
 		},
 	}}
+	if mutateSpec != nil {
+		mutateSpec(monitor.Object["spec"].(map[string]interface{}))
+	}
 	monitor.SetGroupVersionKind(monitoringv1alpha1.GroupVersion.WithKind("SakuraSimpleMonitor"))
 	return monitor
 }

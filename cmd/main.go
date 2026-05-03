@@ -1,24 +1,9 @@
-/*
-Copyright 2026 azuki774.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package main
 
 import (
 	"crypto/tls"
 	"flag"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -38,7 +23,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	monitoringv1alpha1 "github.com/azuki774/crd-sakura-simple-monitor/api/v1alpha1"
+	"github.com/azuki774/crd-sakura-simple-monitor/internal/accesslog"
 	"github.com/azuki774/crd-sakura-simple-monitor/internal/controller"
+	"github.com/azuki774/crd-sakura-simple-monitor/internal/logger"
+	"github.com/azuki774/crd-sakura-simple-monitor/internal/simplemonitor"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -88,6 +76,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	appLogger := logger.NewJSONLogger(os.Stdout, slog.LevelInfo)
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -205,6 +194,9 @@ func main() {
 	if err = (&controller.SakuraSimpleMonitorReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		SakuraSimpleMonitor: simplemonitor.NewClient(
+			accesslog.NewSakuraAPICallerFromEnv(appLogger),
+		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SakuraSimpleMonitor")
 		os.Exit(1)

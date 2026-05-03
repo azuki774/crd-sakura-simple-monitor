@@ -111,7 +111,8 @@ spec:
                     description: RepeatInterval is the re-notification interval in
                       seconds.
                     format: int32
-                    minimum: 1
+                    maximum: 259200
+                    minimum: 3600
                     type: integer
                   webhookURL:
                     description: WebhookURL is the destination webhook URL.
@@ -126,7 +127,8 @@ spec:
               retryInterval:
                 description: RetryInterval is the retry interval in seconds.
                 format: int32
-                minimum: 1
+                maximum: 3600
+                minimum: 10
                 type: integer
               target:
                 description: Target is the hostname or IP address to monitor.
