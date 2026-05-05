@@ -13,7 +13,7 @@ import (
 
 const maxSakuraTags = 10
 
-var sakuraTagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._=-]*$`)
+var sakuraTagPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._@-]*$`)
 
 // Client adapts iaas-service-go to the controller-facing client interface.
 type Client struct {

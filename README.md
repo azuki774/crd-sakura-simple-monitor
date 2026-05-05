@@ -51,7 +51,7 @@ stringData:
   access-token-secret: "<SAKURACLOUD_ACCESS_TOKEN_SECRET>"
 ```
 
-作成・更新されるシンプル監視には、Kubernetes リソースと紐付けるための `managed-by=crd-sakura-simple-monitor` と `k8s-*` タグを付与します。
+作成・更新されるシンプル監視には、Kubernetes リソースと紐付けるための `managed-by-crd-sakura-simple-monitor` と `k8s-*` タグを付与します。
 
 他リポジトリの manifest からは、GitHub Container Registry の image を参照します。
 
