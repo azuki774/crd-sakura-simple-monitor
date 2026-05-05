@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -53,14 +52,7 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(result.RequeueAfter).To(BeZero())
 
 					Expect(fakeSakura.creates).To(HaveLen(1))
-					Expect(fakeSakura.creates[0].Tags).To(ContainElements(
-						"managed-by-crd-sakura-simple-monitor",
-						"k8s-kind-sakurasimplemonitor",
-						"k8s-namespace-default",
-						"k8s-name-create-resource",
-						"k8s-resource-default-create-resource",
-						findTagWithPrefix(fakeSakura.creates[0].Tags, "k8s-uid-"),
-					))
+					Expect(fakeSakura.creates[0].Tags).To(BeEmpty())
 					Expect(fakeSakura.creates[0].Target).To(Equal("example.com"))
 					Expect(fakeSakura.creates[0].Protocol).To(Equal(monitoringv1alpha1.HealthCheckProtocolHTTPS))
 
@@ -87,8 +79,7 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(fakeSakura.reads).To(Equal([]string{"123456789012"}))
 					Expect(fakeSakura.updates).To(HaveLen(1))
 					Expect(fakeSakura.updates[0].id).To(Equal("123456789012"))
-					Expect(fakeSakura.updates[0].desired.Tags).To(ContainElement("k8s-name-update-resource"))
-					Expect(fakeSakura.updates[0].desired.Tags).To(ContainElement("k8s-resource-default-update-resource"))
+					Expect(fakeSakura.updates[0].desired.Tags).To(BeEmpty())
 					Expect(fakeSakura.creates).To(BeEmpty())
 				},
 			}),
@@ -290,16 +281,6 @@ func expectNoReconcileError(err error) {
 
 func clientKey(resource *monitoringv1alpha1.SakuraSimpleMonitor) types.NamespacedName {
 	return types.NamespacedName{Name: resource.Name, Namespace: resource.Namespace}
-}
-
-func findTagWithPrefix(tags []string, prefix string) string {
-	index := slices.IndexFunc(tags, func(tag string) bool {
-		return strings.HasPrefix(tag, prefix)
-	})
-	if index == -1 {
-		return ""
-	}
-	return tags[index]
 }
 
 func findCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
