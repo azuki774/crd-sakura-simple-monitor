@@ -3,12 +3,17 @@ package simplemonitor
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	iaas "github.com/sacloud/iaas-api-go"
 	"github.com/sacloud/iaas-api-go/types"
 	iaassimplemonitor "github.com/sacloud/iaas-service-go/simplemonitor"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+const maxSakuraTags = 10
+
+var sakuraTagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._=-]*$`)
 
 // Client adapts iaas-service-go to the controller-facing client interface.
 type Client struct {
@@ -130,6 +135,17 @@ func (d SimpleMonitorDesired) toHealthCheck() *iaas.SimpleMonitorHealthCheck {
 }
 
 func (d SimpleMonitorDesired) validateSakuraRequestShape() error {
+	if len(d.Tags) > maxSakuraTags {
+		return fmt.Errorf("tags must have at most %d items", maxSakuraTags)
+	}
+	for _, tag := range d.Tags {
+		if tag == "" {
+			return fmt.Errorf("tags must not contain an empty item")
+		}
+		if !sakuraTagPattern.MatchString(tag) {
+			return fmt.Errorf("tag %q must match SakuraCloud tags format", tag)
+		}
+	}
 	if d.Interval < 1 {
 		return fmt.Errorf("interval must be greater than or equal to 1")
 	}
