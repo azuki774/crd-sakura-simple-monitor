@@ -2,9 +2,12 @@ package simplemonitor
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 
+	"github.com/go-logr/logr"
 	iaas "github.com/sacloud/iaas-api-go"
 	"github.com/sacloud/iaas-api-go/types"
 	iaassimplemonitor "github.com/sacloud/iaas-service-go/simplemonitor"
@@ -33,6 +36,7 @@ func (c *Client) Create(ctx context.Context, desired SimpleMonitorDesired) (stri
 	logger.Info("creating SakuraCloud simple monitor", "target", desired.Target, "tags", desired.Tags)
 	created, err := c.service.CreateWithContext(ctx, desired.toCreateRequest())
 	if err != nil {
+		logSakuraAPIError(logger, "create", err)
 		return "", err
 	}
 	logger.Info("created SakuraCloud simple monitor", "monitorID", created.ID.String(), "target", desired.Target)
@@ -48,10 +52,40 @@ func (c *Client) Read(ctx context.Context, id string) error {
 		return ErrSimpleMonitorNotFound
 	}
 	if err != nil {
+		logSakuraAPIError(logger, "read", err)
 		return err
 	}
 	logger.Info("read SakuraCloud simple monitor", "monitorID", id)
 	return err
+}
+
+func logSakuraAPIError(logger logr.Logger, operation string, err error) {
+	var apiErr iaas.APIError
+	if !errors.As(err, &apiErr) {
+		return
+	}
+
+	responseBody := ""
+	apiStatus := ""
+	if origErr := apiErr.OrigErr(); origErr != nil {
+		apiStatus = origErr.Status
+		body, marshalErr := json.Marshal(origErr)
+		if marshalErr == nil {
+			responseBody = string(body)
+		}
+	}
+
+	logger.Error(
+		err,
+		"SakuraCloud API returned an error",
+		"operation", operation,
+		"responseCode", apiErr.ResponseCode(),
+		"apiStatus", apiStatus,
+		"serial", apiErr.Serial(),
+		"errorCode", apiErr.Code(),
+		"errorMessage", apiErr.Message(),
+		"responseBody", responseBody,
+	)
 }
 
 func (c *Client) Update(ctx context.Context, id string, desired SimpleMonitorDesired) error {
@@ -66,6 +100,7 @@ func (c *Client) Update(ctx context.Context, id string, desired SimpleMonitorDes
 		return ErrSimpleMonitorNotFound
 	}
 	if err != nil {
+		logSakuraAPIError(logger, "update", err)
 		return err
 	}
 	logger.Info("updated SakuraCloud simple monitor", "monitorID", id, "target", desired.Target)
