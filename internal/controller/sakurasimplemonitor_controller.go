@@ -131,7 +131,7 @@ func resourceTags(monitor *monitoringv1alpha1.SakuraSimpleMonitor) []string {
 		kindTag,
 		fmt.Sprintf("k8s-namespace=%s", monitor.Namespace),
 		fmt.Sprintf("k8s-name=%s", monitor.Name),
-		fmt.Sprintf("k8s-resource=%s/%s", monitor.Namespace, monitor.Name),
+		fmt.Sprintf("k8s-resource=%s-%s", monitor.Namespace, monitor.Name),
 		fmt.Sprintf("k8s-uid=%s", monitor.UID),
 	}
 }
