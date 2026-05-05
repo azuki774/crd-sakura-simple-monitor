@@ -16,17 +16,22 @@ func TestSimpleMonitorDesiredValidateSakuraRequestShapeTags(t *testing.T) {
 		{
 			name: "accepts generated tags",
 			tags: []string{
-				"managed-by=crd-sakura-simple-monitor",
-				"k8s-kind=SakuraSimpleMonitor",
-				"k8s-namespace=monitoring",
-				"k8s-name=nostr-dev",
-				"k8s-resource=monitoring-nostr-dev",
-				"k8s-uid=12345678-1234-1234-1234-123456789012",
+				"managed-by-crd-sakura-simple-monitor",
+				"k8s-kind-sakurasimplemonitor",
+				"k8s-namespace-monitoring",
+				"k8s-name-nostr-dev",
+				"k8s-resource-monitoring-nostr-dev",
+				"k8s-uid-12345678-1234-1234-1234-123456789012",
 			},
 		},
 		{
 			name:    "rejects slash",
-			tags:    []string{"k8s-resource=monitoring/nostr-dev"},
+			tags:    []string{"k8s-resource-monitoring/nostr-dev"},
+			wantErr: "must match SakuraCloud tags format",
+		},
+		{
+			name:    "rejects equals",
+			tags:    []string{"k8s-name=nostr-dev"},
 			wantErr: "must match SakuraCloud tags format",
 		},
 		{
@@ -41,7 +46,7 @@ func TestSimpleMonitorDesiredValidateSakuraRequestShapeTags(t *testing.T) {
 		},
 		{
 			name:    "rejects whitespace",
-			tags:    []string{"k8s-name=nostr dev"},
+			tags:    []string{"k8s-name-nostr dev"},
 			wantErr: "must match SakuraCloud tags format",
 		},
 	}

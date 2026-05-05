@@ -54,12 +54,12 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 
 					Expect(fakeSakura.creates).To(HaveLen(1))
 					Expect(fakeSakura.creates[0].Tags).To(ContainElements(
-						"managed-by=crd-sakura-simple-monitor",
-						"k8s-kind=SakuraSimpleMonitor",
-						"k8s-namespace=default",
-						"k8s-name=create-resource",
-						"k8s-resource=default-create-resource",
-						findTagWithPrefix(fakeSakura.creates[0].Tags, "k8s-uid="),
+						"managed-by-crd-sakura-simple-monitor",
+						"k8s-kind-sakurasimplemonitor",
+						"k8s-namespace-default",
+						"k8s-name-create-resource",
+						"k8s-resource-default-create-resource",
+						findTagWithPrefix(fakeSakura.creates[0].Tags, "k8s-uid-"),
 					))
 					Expect(fakeSakura.creates[0].Target).To(Equal("example.com"))
 					Expect(fakeSakura.creates[0].Protocol).To(Equal(monitoringv1alpha1.HealthCheckProtocolHTTPS))
@@ -87,8 +87,8 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(fakeSakura.reads).To(Equal([]string{"123456789012"}))
 					Expect(fakeSakura.updates).To(HaveLen(1))
 					Expect(fakeSakura.updates[0].id).To(Equal("123456789012"))
-					Expect(fakeSakura.updates[0].desired.Tags).To(ContainElement("k8s-name=update-resource"))
-					Expect(fakeSakura.updates[0].desired.Tags).To(ContainElement("k8s-resource=default-update-resource"))
+					Expect(fakeSakura.updates[0].desired.Tags).To(ContainElement("k8s-name-update-resource"))
+					Expect(fakeSakura.updates[0].desired.Tags).To(ContainElement("k8s-resource-default-update-resource"))
 					Expect(fakeSakura.creates).To(BeEmpty())
 				},
 			}),

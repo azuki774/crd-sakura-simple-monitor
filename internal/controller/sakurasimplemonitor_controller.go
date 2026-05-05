@@ -24,8 +24,8 @@ const (
 	syncReasonSucceeded = "SyncSucceeded"
 	syncReasonFailed    = "SyncFailed"
 
-	managedByTag = "managed-by=crd-sakura-simple-monitor"
-	kindTag      = "k8s-kind=SakuraSimpleMonitor"
+	managedByTag = "managed-by-crd-sakura-simple-monitor"
+	kindTag      = "k8s-kind-sakurasimplemonitor"
 )
 
 // SakuraSimpleMonitorReconciler reconciles a SakuraSimpleMonitor object
@@ -129,10 +129,10 @@ func resourceTags(monitor *monitoringv1alpha1.SakuraSimpleMonitor) []string {
 	return []string{
 		managedByTag,
 		kindTag,
-		fmt.Sprintf("k8s-namespace=%s", monitor.Namespace),
-		fmt.Sprintf("k8s-name=%s", monitor.Name),
-		fmt.Sprintf("k8s-resource=%s-%s", monitor.Namespace, monitor.Name),
-		fmt.Sprintf("k8s-uid=%s", monitor.UID),
+		fmt.Sprintf("k8s-namespace-%s", monitor.Namespace),
+		fmt.Sprintf("k8s-name-%s", monitor.Name),
+		fmt.Sprintf("k8s-resource-%s-%s", monitor.Namespace, monitor.Name),
+		fmt.Sprintf("k8s-uid-%s", monitor.UID),
 	}
 }
 
