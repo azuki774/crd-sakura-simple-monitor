@@ -92,6 +92,41 @@ var _ = Describe("SakuraCloud API access log", func() {
 		// query には認証情報や検索条件が混ざる可能性があるため、ログには含めない。
 		Expect(sanitizeAccessLogURI("https://example.com/path?token=secret#fragment")).To(Equal("https://example.com/path"))
 	})
+
+	It("logs retryable response status and body without consuming the response body", func() {
+		var records bytes.Buffer
+		ctx := context.Background()
+		log := logger.NewJSONLogger(&records, slog.LevelInfo)
+		req, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodPost,
+			"https://secure.sakura.ad.jp/cloud/zone/is1a/api/cloud/1.1/commonserviceitem?token=secret",
+			nil,
+		)
+		Expect(err).NotTo(HaveOccurred())
+		resp := &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Request:    req,
+			Body:       io.NopCloser(strings.NewReader(`{"error_msg":"temporary unavailable"}`)),
+		}
+
+		shouldRetry, err := retryLoggingCheckRetryFunc(nil, []int{http.StatusServiceUnavailable}, namedLogger(log))(ctx, resp, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRetry).To(BeTrue())
+
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(Equal(`{"error_msg":"temporary unavailable"}`))
+
+		record := records.String()
+		Expect(record).To(ContainSubstring("SakuraCloud API retrying after response"))
+		Expect(record).To(ContainSubstring(`"method":"POST"`))
+		Expect(record).To(ContainSubstring(`"uri":"https://secure.sakura.ad.jp/cloud/zone/is1a/api/cloud/1.1/commonserviceitem"`))
+		Expect(record).NotTo(ContainSubstring("token=secret"))
+		Expect(record).To(ContainSubstring(`"statusCode":503`))
+		Expect(record).To(ContainSubstring(`"responseBody":"{\"error_msg\":\"temporary unavailable\"}"`))
+		Expect(record).To(ContainSubstring(`"responseBodyTruncated":false`))
+	})
 })
 
 type accessLogCase struct {
