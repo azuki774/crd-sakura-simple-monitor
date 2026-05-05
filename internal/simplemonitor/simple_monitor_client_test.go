@@ -73,6 +73,21 @@ func TestSimpleMonitorDesiredValidateSakuraRequestShapeTags(t *testing.T) {
 	}
 }
 
+func TestSimpleMonitorDesiredToCreateRequest(t *testing.T) {
+	desired := validSimpleMonitorDesired()
+	req := desired.toCreateRequest()
+
+	if req.Class != "simplemon" {
+		t.Errorf("toCreateRequest().Class = %q, want %q", req.Class, "simplemon")
+	}
+	if req.Target != desired.Target {
+		t.Errorf("toCreateRequest().Target = %q, want %q", req.Target, desired.Target)
+	}
+	if req.DelayLoop != int(desired.Interval)*60 {
+		t.Errorf("toCreateRequest().DelayLoop = %d, want %d", req.DelayLoop, desired.Interval*60)
+	}
+}
+
 func validSimpleMonitorDesired() SimpleMonitorDesired {
 	return SimpleMonitorDesired{
 		Target:         "example.com",

@@ -109,6 +109,7 @@ func (c *Client) Update(ctx context.Context, id string, desired SimpleMonitorDes
 
 func (d SimpleMonitorDesired) toCreateRequest() *iaassimplemonitor.CreateRequest {
 	return &iaassimplemonitor.CreateRequest{
+		Class:              "simplemon",
 		Target:             d.Target,
 		Description:        d.Description,
 		Tags:               types.Tags(d.Tags),
