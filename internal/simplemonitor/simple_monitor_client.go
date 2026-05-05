@@ -13,12 +13,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-const maxSakuraTags = 10
+const (
+	maxSakuraTags = 10
+	// sakuraCloudAPIPath is the API endpoint for CommonServiceItem (SimpleMonitor uses this resource type).
+	// See: https://manual.sakura.ad.jp/cloud/api/api-resource-commonserviceitem/
+	sakuraCloudAPIPath = "/cloud/zone/is1a/api/cloud/1.1/commonserviceitem"
+)
 
 var sakuraTagPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._@-]*$`)
 
 // simpleMonitorCreateRequest is the request body for creating a SimpleMonitor.
 // It includes the Provider.Class field which is required by the SakuraCloud API.
+//
+// さくらクラウドのSDK (iaas-service-go) の CreateRequest には Provider フィールドがないため、
+// リクエストボディを手動で構築する必要がある。API に Provider.Class を指定しないと
+// "ECommonServiceClass cannot accept ”" エラーが発生する。
 type simpleMonitorCreateRequest struct {
 	CommonServiceItem *simpleMonitorCreateRequestBody `json:"CommonServiceItem"`
 }
@@ -111,7 +120,7 @@ func (c *Client) Create(ctx context.Context, desired SimpleMonitorDesired) (stri
 	logger.Info("creating SakuraCloud simple monitor", "target", desired.Target, "tags", desired.Tags)
 
 	reqBody := desired.toCreateRequestBody()
-	data, err := c.sakuraCaller.Do(ctx, "POST", "/cloud/zone/is1a/api/cloud/1.1/commonserviceitem", reqBody)
+	data, err := c.sakuraCaller.Do(ctx, "POST", sakuraCloudAPIPath, reqBody)
 	if err != nil {
 		logSakuraAPIError(logger, "create", err)
 		return "", err
