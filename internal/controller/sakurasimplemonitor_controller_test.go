@@ -55,6 +55,7 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(fakeSakura.creates[0].Tags).To(BeEmpty())
 					Expect(fakeSakura.creates[0].Target).To(Equal("example.com"))
 					Expect(fakeSakura.creates[0].Protocol).To(Equal(monitoringv1alpha1.HealthCheckProtocolHTTPS))
+					Expect(fakeSakura.creates[0].HTTP2).To(BeTrue())
 
 					fetched := getTestMonitor(ctx, "create-resource")
 					Expect(fetched.Status.MonitorID).To(Equal("123456789012"))
@@ -233,6 +234,7 @@ func createTestMonitor(ctx context.Context, name string) *monitoringv1alpha1.Sak
 				Path:           "/healthz",
 				ExpectedStatus: 200,
 				TimeoutSeconds: 10,
+				HTTP2:          true,
 			},
 			Interval:      1,
 			RetryInterval: 20,

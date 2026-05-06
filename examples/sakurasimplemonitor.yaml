@@ -11,6 +11,7 @@ spec:
     path: /healthz
     expectedStatus: 200
     timeoutSeconds: 10
+    http2: true
   interval: 1
   retryInterval: 20
   notifications:

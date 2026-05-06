@@ -24,6 +24,7 @@ func TestClientCreateUsesSDKCommonServiceItemEndpointAndBody(t *testing.T) {
 	desired.ExpectedStatus = 200
 	desired.Interval = 1
 	desired.TimeoutSeconds = 10
+	desired.HTTP2 = true
 	desired.RetryInterval = 20
 	desired.RepeatInterval = 7200
 	desired.Tags = []string{}
@@ -74,6 +75,7 @@ func TestClientCreateUsesSDKCommonServiceItemEndpointAndBody(t *testing.T) {
 	assertJSONValue(t, healthCheck, "Protocol", "http")
 	assertJSONValue(t, healthCheck, "Path", "/")
 	assertJSONValue(t, healthCheck, "Status", "200")
+	assertJSONValue(t, healthCheck, "HTTP2", "True")
 	assertJSONValue(t, notifyEmail, "Enabled", "False")
 	assertJSONValue(t, notifySlack, "Enabled", "True")
 	if _, ok := item["Tags"].([]interface{}); !ok {

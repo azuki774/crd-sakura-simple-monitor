@@ -195,6 +195,7 @@ func (d SimpleMonitorDesired) toIAASHealthCheck() *iaas.SimpleMonitorHealthCheck
 		Path:     d.Path,
 		Status:   types.StringNumber(d.ExpectedStatus),
 		SNI:      types.StringTrue,
+		HTTP2:    types.StringFlag(d.HTTP2),
 		Host:     d.Target,
 	}
 }

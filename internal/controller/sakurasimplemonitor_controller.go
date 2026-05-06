@@ -113,6 +113,7 @@ func desiredSimpleMonitor(monitor *monitoringv1alpha1.SakuraSimpleMonitor) simpl
 		Path:           monitor.Spec.HealthCheck.Path,
 		ExpectedStatus: monitor.Spec.HealthCheck.ExpectedStatus,
 		TimeoutSeconds: monitor.Spec.HealthCheck.TimeoutSeconds,
+		HTTP2:          monitor.Spec.HealthCheck.HTTP2,
 		Interval:       monitor.Spec.Interval,
 		RetryInterval:  monitor.Spec.RetryInterval,
 		WebhookURL:     monitor.Spec.Notifications.WebhookURL,
