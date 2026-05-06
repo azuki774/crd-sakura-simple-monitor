@@ -97,11 +97,44 @@ var _ = Describe("SakuraCloud API access log", func() {
 		var records bytes.Buffer
 		ctx := context.Background()
 		log := logger.NewJSONLogger(&records, slog.LevelInfo)
+		requestBody := strings.NewReader(`{
+			"CommonServiceItem": {
+				"Name": "nostr-dev.azuki.blue",
+				"Status": {"Target": "nostr-dev.azuki.blue"},
+				"Provider": {"Class": "simplemon"},
+				"Settings": {
+					"SimpleMonitor": {
+						"DelayLoop": 300,
+						"RetryInterval": 60,
+						"MaxCheckAttempts": 1,
+						"Enabled": "True",
+						"Timeout": 10,
+						"NotifyInterval": 7200,
+						"NotifyEmail": {"Enabled": "False"},
+						"NotifySlack": {
+							"Enabled": "True",
+							"IncomingWebhooksURL": "https://hooks.slack.com/services/secret"
+						},
+						"HealthCheck": {
+							"Protocol": "https",
+							"Host": "nostr-dev.azuki.blue",
+							"Port": "443",
+							"Path": "/",
+							"Status": "200",
+							"SNI": "True",
+							"HTTP2": "False",
+							"VerifySNI": "False",
+							"BasicAuthPassword": "password"
+						}
+					}
+				}
+			}
+		}`)
 		req, err := http.NewRequestWithContext(
 			ctx,
 			http.MethodPost,
 			"https://secure.sakura.ad.jp/cloud/zone/is1a/api/cloud/1.1/commonserviceitem?token=secret",
-			nil,
+			requestBody,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		resp := &http.Response{
@@ -123,6 +156,13 @@ var _ = Describe("SakuraCloud API access log", func() {
 		Expect(record).To(ContainSubstring(`"method":"POST"`))
 		Expect(record).To(ContainSubstring(`"uri":"https://secure.sakura.ad.jp/cloud/zone/is1a/api/cloud/1.1/commonserviceitem"`))
 		Expect(record).NotTo(ContainSubstring("token=secret"))
+		Expect(record).To(ContainSubstring(`"requestProviderClass":"simplemon"`))
+		Expect(record).To(ContainSubstring(`"requestStatusTarget":"nostr-dev.azuki.blue"`))
+		Expect(record).To(ContainSubstring(`"requestHealthCheckProtocol":"https"`))
+		Expect(record).To(ContainSubstring(`"requestHealthCheckHTTP2":"False"`))
+		Expect(record).To(ContainSubstring(`"requestSlackWebhookURLConfigured":true`))
+		Expect(record).NotTo(ContainSubstring("hooks.slack.com"))
+		Expect(record).NotTo(ContainSubstring("password"))
 		Expect(record).To(ContainSubstring(`"statusCode":503`))
 		Expect(record).To(ContainSubstring(`"responseBody":"{\"error_msg\":\"temporary unavailable\"}"`))
 		Expect(record).To(ContainSubstring(`"responseBodyTruncated":false`))
