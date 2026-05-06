@@ -221,6 +221,12 @@ func logRetryableResponse(ctx context.Context, log logger.Logger, resp *http.Res
 			"uri", uri,
 			"statusCode", resp.StatusCode,
 		)
+		if requestValues, readErr := sanitizedRetryRequestValues(resp.Request); readErr != nil {
+			values = append(values, "requestSummaryReadError", readErr.Error())
+		} else {
+			values = append(values, requestValues...)
+		}
+
 		body, truncated, readErr := readAndRestoreResponseBody(resp, maxRetryResponseBodyLogBytes)
 		if readErr != nil {
 			values = append(values, "responseBodyReadError", readErr.Error())
@@ -236,6 +242,77 @@ func logRetryableResponse(ctx context.Context, log logger.Logger, resp *http.Res
 		return
 	}
 	log.Info(ctx, "SakuraCloud API retrying after response", values...)
+}
+
+func sanitizedRetryRequestValues(req *http.Request) ([]interface{}, error) {
+	if req == nil || req.GetBody == nil {
+		return nil, nil
+	}
+	bodyReader, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	defer bodyReader.Close() //nolint:errcheck
+
+	body, err := io.ReadAll(bodyReader)
+	if err != nil {
+		return nil, err
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("request body is not JSON: %w", err)
+	}
+	return sakuraCommonServiceItemRequestSummary(payload), nil
+}
+
+func sakuraCommonServiceItemRequestSummary(payload map[string]interface{}) []interface{} {
+	item := nestedMap(payload, "CommonServiceItem")
+	if item == nil {
+		return nil
+	}
+
+	status := nestedMap(item, "Status")
+	provider := nestedMap(item, "Provider")
+	settings := nestedMap(item, "Settings")
+	simpleMonitor := nestedMap(settings, "SimpleMonitor")
+	healthCheck := nestedMap(simpleMonitor, "HealthCheck")
+	notifyEmail := nestedMap(simpleMonitor, "NotifyEmail")
+	notifySlack := nestedMap(simpleMonitor, "NotifySlack")
+
+	return []interface{}{
+		"requestProviderClass", provider["Class"],
+		"requestName", item["Name"],
+		"requestStatusTarget", status["Target"],
+		"requestDelayLoop", simpleMonitor["DelayLoop"],
+		"requestRetryInterval", simpleMonitor["RetryInterval"],
+		"requestMaxCheckAttempts", simpleMonitor["MaxCheckAttempts"],
+		"requestEnabled", simpleMonitor["Enabled"],
+		"requestTimeout", simpleMonitor["Timeout"],
+		"requestNotifyInterval", simpleMonitor["NotifyInterval"],
+		"requestNotifyEmailEnabled", notifyEmail["Enabled"],
+		"requestNotifySlackEnabled", notifySlack["Enabled"],
+		"requestSlackWebhookURLConfigured", notifySlack["IncomingWebhooksURL"] != nil && notifySlack["IncomingWebhooksURL"] != "",
+		"requestHealthCheckProtocol", healthCheck["Protocol"],
+		"requestHealthCheckHost", healthCheck["Host"],
+		"requestHealthCheckPort", healthCheck["Port"],
+		"requestHealthCheckPath", healthCheck["Path"],
+		"requestHealthCheckStatus", healthCheck["Status"],
+		"requestHealthCheckSNI", healthCheck["SNI"],
+		"requestHealthCheckHTTP2", healthCheck["HTTP2"],
+		"requestHealthCheckVerifySNI", healthCheck["VerifySNI"],
+	}
+}
+
+func nestedMap(parent map[string]interface{}, key string) map[string]interface{} {
+	if parent == nil {
+		return map[string]interface{}{}
+	}
+	child, ok := parent[key].(map[string]interface{})
+	if !ok {
+		return map[string]interface{}{}
+	}
+	return child
 }
 
 func readAndRestoreResponseBody(resp *http.Response, limit int64) (string, bool, error) {
