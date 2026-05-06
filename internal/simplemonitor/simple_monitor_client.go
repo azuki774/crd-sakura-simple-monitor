@@ -13,104 +13,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-const (
-	maxSakuraTags = 10
-	// sakuraCloudAPIPath is the API endpoint for CommonServiceItem (SimpleMonitor uses this resource type).
-	// See: https://manual.sakura.ad.jp/cloud/api/api-resource-commonserviceitem/
-	sakuraCloudAPIPath = "/is1a/api/cloud/1.1/commonserviceitem"
-)
+const maxSakuraTags = 10
 
 var sakuraTagPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._@-]*$`)
 
-// simpleMonitorCreateRequest is the request body for creating a SimpleMonitor.
-// It includes the Provider.Class field which is required by the SakuraCloud API.
-//
-// さくらクラウドのSDK (iaas-service-go) の CreateRequest には Provider フィールドがないため、
-// リクエストボディを手動で構築する必要がある。API に Provider.Class を指定しないと
-// "ECommonServiceClass cannot accept ”" エラーが発生する。
-type simpleMonitorCreateRequest struct {
-	CommonServiceItem *simpleMonitorCreateRequestBody `json:"CommonServiceItem"`
-}
-
-type simpleMonitorCreateRequestBody struct {
-	Name        string                `json:"Name"`
-	Description string                `json:"Description,omitempty"`
-	Status      simpleMonitorStatus   `json:"Status,omitempty"`
-	Settings    simpleMonitorSettings `json:"Settings"`
-	Provider    simpleMonitorProvider `json:"Provider"`
-	Tags        types.Tags            `json:"Tags"`
-	Icon        simpleMonitorIcon     `json:"Icon"`
-}
-
-type simpleMonitorStatus struct {
-	Target string `json:"Target"`
-}
-
-type simpleMonitorSettings struct {
-	SimpleMonitor simpleMonitorConfig `json:"SimpleMonitor"`
-}
-
-type simpleMonitorConfig struct {
-	DelayLoop        types.StringNumber       `json:"DelayLoop"`
-	MaxCheckAttempts types.StringNumber       `json:"MaxCheckAttempts"`
-	RetryInterval    types.StringNumber       `json:"RetryInterval"`
-	Enabled          types.StringFlag         `json:"Enabled"`
-	Timeout          types.StringNumber       `json:"Timeout"`
-	HealthCheck      simpleMonitorHealthCheck `json:"HealthCheck"`
-	NotifyEmail      simpleMonitorNotifyEmail `json:"NotifyEmail"`
-	NotifySlack      simpleMonitorNotifySlack `json:"NotifySlack"`
-	NotifyInterval   types.StringNumber       `json:"NotifyInterval"`
-}
-
-type simpleMonitorHealthCheck struct {
-	Protocol types.ESimpleMonitorProtocol `json:"Protocol"`
-	Host     string                       `json:"Host"`
-	Path     string                       `json:"Path,omitempty"`
-	Port     types.StringNumber           `json:"Port,omitempty"`
-	Status   types.StringNumber           `json:"Status,omitempty"`
-	SNI      types.StringFlag             `json:"SNI,omitempty"`
-	HTTP2    types.StringFlag             `json:"HTTP2,omitempty"`
-}
-
-type simpleMonitorNotifyEmail struct {
-	Enabled types.StringFlag `json:"Enabled"`
-	HTML    types.StringFlag `json:"HTML,omitempty"`
-}
-
-type simpleMonitorNotifySlack struct {
-	Enabled             types.StringFlag `json:"Enabled"`
-	IncomingWebhooksURL string           `json:"IncomingWebhooksURL,omitempty"`
-}
-
-type simpleMonitorProvider struct {
-	Class string `json:"Class"`
-}
-
-type simpleMonitorIcon struct{}
-
-// simpleMonitorResponse is the API response for SimpleMonitor operations.
-type simpleMonitorResponse struct {
-	CommonServiceItem *simpleMonitorResponseBody `json:"CommonServiceItem"`
-	IsOK              bool                       `json:"is_ok"`
-}
-
-type simpleMonitorResponseBody struct {
-	ID          string `json:"ID"`
-	Name        string `json:"Name"`
-	Description string `json:"Description,omitempty"`
-}
-
 // Client calls SakuraCloud SimpleMonitor API via HTTP.
 type Client struct {
-	op           iaas.SimpleMonitorAPI
-	sakuraCaller iaas.APICaller
+	op iaas.SimpleMonitorAPI
 }
 
 // NewClient creates a SimpleMonitor client from an API caller.
 func NewClient(caller iaas.APICaller) *Client {
 	return &Client{
-		op:           iaas.NewSimpleMonitorOp(caller),
-		sakuraCaller: caller,
+		op: iaas.NewSimpleMonitorOp(caller),
 	}
 }
 
@@ -121,25 +36,37 @@ func (c *Client) Create(ctx context.Context, desired SimpleMonitorDesired) (stri
 	logger := log.FromContext(ctx).WithName("sakura-simple-monitor")
 	logger.Info("creating SakuraCloud simple monitor", "target", desired.Target, "tags", desired.Tags)
 
-	reqBody := desired.toCreateRequestBody()
-	data, err := c.sakuraCaller.Do(ctx, "POST", iaas.SakuraCloudAPIRoot+sakuraCloudAPIPath, reqBody)
+	req := desired.toCreateRequest()
+	logger.V(1).Info(
+		"SakuraCloud simple monitor create request parameters",
+		"target", req.Target,
+		"description", req.Description,
+		"tags", req.Tags,
+		"maxCheckAttempts", req.MaxCheckAttempts,
+		"retryInterval", req.RetryInterval,
+		"delayLoop", req.DelayLoop,
+		"enabled", req.Enabled,
+		"healthCheck", req.HealthCheck,
+		"notifyEmailEnabled", req.NotifyEmailEnabled,
+		"notifyEmailHTML", req.NotifyEmailHTML,
+		"notifySlackEnabled", req.NotifySlackEnabled,
+		"slackWebhookURLConfigured", req.SlackWebhooksURL != "",
+		"notifyInterval", req.NotifyInterval,
+		"timeout", req.Timeout,
+	)
+
+	created, err := c.op.Create(ctx, req)
 	if err != nil {
 		logSakuraAPIError(logger, "create", err)
 		return "", err
 	}
-
-	var resp simpleMonitorResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		logger.Error(err, "failed to parse response", "response", string(data))
-		return "", fmt.Errorf("failed to parse response: %w", err)
+	if created == nil {
+		return "", errors.New("SakuraCloud API returned an empty simple monitor")
 	}
 
-	if !resp.IsOK || resp.CommonServiceItem == nil {
-		return "", fmt.Errorf("API returned error: is_ok=false, response=%s", string(data))
-	}
-
-	logger.Info("created SakuraCloud simple monitor", "monitorID", resp.CommonServiceItem.ID, "target", desired.Target)
-	return resp.CommonServiceItem.ID, nil
+	monitorID := created.ID.String()
+	logger.Info("created SakuraCloud simple monitor", "monitorID", monitorID, "target", desired.Target)
+	return monitorID, nil
 }
 
 func (c *Client) Read(ctx context.Context, id string) error {
@@ -193,7 +120,25 @@ func (c *Client) Update(ctx context.Context, id string, desired SimpleMonitorDes
 	}
 	logger := log.FromContext(ctx).WithName("sakura-simple-monitor")
 	logger.Info("updating SakuraCloud simple monitor", "monitorID", id, "target", desired.Target, "tags", desired.Tags)
-	_, err := c.op.Update(ctx, types.StringID(id), desired.toUpdateRequest())
+	req := desired.toUpdateRequest()
+	logger.V(1).Info(
+		"SakuraCloud simple monitor update request parameters",
+		"monitorID", id,
+		"description", req.Description,
+		"tags", req.Tags,
+		"maxCheckAttempts", req.MaxCheckAttempts,
+		"retryInterval", req.RetryInterval,
+		"delayLoop", req.DelayLoop,
+		"enabled", req.Enabled,
+		"healthCheck", req.HealthCheck,
+		"notifyEmailEnabled", req.NotifyEmailEnabled,
+		"notifyEmailHTML", req.NotifyEmailHTML,
+		"notifySlackEnabled", req.NotifySlackEnabled,
+		"slackWebhookURLConfigured", req.SlackWebhooksURL != "",
+		"notifyInterval", req.NotifyInterval,
+		"timeout", req.Timeout,
+	)
+	_, err := c.op.Update(ctx, types.StringID(id), req)
 	if iaas.IsNotFoundError(err) {
 		logger.Info("SakuraCloud simple monitor was not found during update", "monitorID", id)
 		return ErrSimpleMonitorNotFound
@@ -206,28 +151,22 @@ func (c *Client) Update(ctx context.Context, id string, desired SimpleMonitorDes
 	return err
 }
 
-func (d SimpleMonitorDesired) toCreateRequestBody() *simpleMonitorCreateRequest {
-	return &simpleMonitorCreateRequest{
-		CommonServiceItem: &simpleMonitorCreateRequestBody{
-			Name:        d.Target,
-			Description: d.Description,
-			Status:      simpleMonitorStatus{Target: d.Target},
-			Settings: simpleMonitorSettings{
-				SimpleMonitor: simpleMonitorConfig{
-					DelayLoop:        types.StringNumber(d.Interval * 60),
-					MaxCheckAttempts: types.StringNumber(1),
-					RetryInterval:    types.StringNumber(d.RetryInterval),
-					Enabled:          types.StringTrue,
-					Timeout:          types.StringNumber(d.TimeoutSeconds),
-					HealthCheck:      d.toHealthCheck(),
-					NotifyEmail:      simpleMonitorNotifyEmail{Enabled: types.StringFalse},
-					NotifySlack:      simpleMonitorNotifySlack{Enabled: types.StringTrue, IncomingWebhooksURL: d.WebhookURL},
-					NotifyInterval:   types.StringNumber(d.RepeatInterval),
-				},
-			},
-			Provider: simpleMonitorProvider{Class: "simplemon"},
-			Tags:     types.Tags(d.Tags),
-		},
+func (d SimpleMonitorDesired) toCreateRequest() *iaas.SimpleMonitorCreateRequest {
+	return &iaas.SimpleMonitorCreateRequest{
+		Target:             d.Target,
+		Description:        d.Description,
+		Tags:               types.Tags(d.Tags),
+		MaxCheckAttempts:   1,
+		RetryInterval:      int(d.RetryInterval),
+		DelayLoop:          int(d.Interval) * 60,
+		Enabled:            types.StringTrue,
+		HealthCheck:        d.toIAASHealthCheck(),
+		NotifyEmailEnabled: types.StringFalse,
+		NotifyEmailHTML:    types.StringFalse,
+		NotifySlackEnabled: types.StringTrue,
+		SlackWebhooksURL:   d.WebhookURL,
+		NotifyInterval:     int(d.RepeatInterval),
+		Timeout:            int(d.TimeoutSeconds),
 	}
 }
 
@@ -246,17 +185,6 @@ func (d SimpleMonitorDesired) toUpdateRequest() *iaas.SimpleMonitorUpdateRequest
 		SlackWebhooksURL:   d.WebhookURL,
 		NotifyInterval:     int(d.RepeatInterval),
 		Timeout:            int(d.TimeoutSeconds),
-	}
-}
-
-func (d SimpleMonitorDesired) toHealthCheck() simpleMonitorHealthCheck {
-	return simpleMonitorHealthCheck{
-		Protocol: types.ESimpleMonitorProtocol(d.Protocol),
-		Port:     types.StringNumber(d.Port),
-		Path:     d.Path,
-		Status:   types.StringNumber(d.ExpectedStatus),
-		SNI:      types.StringTrue,
-		Host:     d.Target,
 	}
 }
 
