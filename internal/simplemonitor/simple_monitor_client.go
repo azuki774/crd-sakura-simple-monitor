@@ -17,7 +17,7 @@ const (
 	maxSakuraTags = 10
 	// sakuraCloudAPIPath is the API endpoint for CommonServiceItem (SimpleMonitor uses this resource type).
 	// See: https://manual.sakura.ad.jp/cloud/api/api-resource-commonserviceitem/
-	sakuraCloudAPIPath = "/cloud/zone/is1a/api/cloud/1.1/commonserviceitem"
+	sakuraCloudAPIPath = "/is1a/api/cloud/1.1/commonserviceitem"
 )
 
 var sakuraTagPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._@-]*$`)
@@ -38,8 +38,8 @@ type simpleMonitorCreateRequestBody struct {
 	Status      simpleMonitorStatus   `json:"Status,omitempty"`
 	Settings    simpleMonitorSettings `json:"Settings"`
 	Provider    simpleMonitorProvider `json:"Provider"`
-	Tags        types.Tags            `json:"Tags,omitempty"`
-	Icon        *types.ID             `json:"Icon,omitempty"`
+	Tags        types.Tags            `json:"Tags"`
+	Icon        simpleMonitorIcon     `json:"Icon"`
 }
 
 type simpleMonitorStatus struct {
@@ -51,15 +51,15 @@ type simpleMonitorSettings struct {
 }
 
 type simpleMonitorConfig struct {
-	DelayLoop        int                      `json:"DelayLoop"`
-	MaxCheckAttempts int                      `json:"MaxCheckAttempts"`
-	RetryInterval    int                      `json:"RetryInterval"`
+	DelayLoop        types.StringNumber       `json:"DelayLoop"`
+	MaxCheckAttempts types.StringNumber       `json:"MaxCheckAttempts"`
+	RetryInterval    types.StringNumber       `json:"RetryInterval"`
 	Enabled          types.StringFlag         `json:"Enabled"`
-	Timeout          int                      `json:"Timeout"`
+	Timeout          types.StringNumber       `json:"Timeout"`
 	HealthCheck      simpleMonitorHealthCheck `json:"HealthCheck"`
 	NotifyEmail      simpleMonitorNotifyEmail `json:"NotifyEmail"`
 	NotifySlack      simpleMonitorNotifySlack `json:"NotifySlack"`
-	NotifyInterval   int                      `json:"NotifyInterval"`
+	NotifyInterval   types.StringNumber       `json:"NotifyInterval"`
 }
 
 type simpleMonitorHealthCheck struct {
@@ -85,6 +85,8 @@ type simpleMonitorNotifySlack struct {
 type simpleMonitorProvider struct {
 	Class string `json:"Class"`
 }
+
+type simpleMonitorIcon struct{}
 
 // simpleMonitorResponse is the API response for SimpleMonitor operations.
 type simpleMonitorResponse struct {
@@ -212,15 +214,15 @@ func (d SimpleMonitorDesired) toCreateRequestBody() *simpleMonitorCreateRequest 
 			Status:      simpleMonitorStatus{Target: d.Target},
 			Settings: simpleMonitorSettings{
 				SimpleMonitor: simpleMonitorConfig{
-					DelayLoop:        int(d.Interval) * 60,
-					MaxCheckAttempts: 1,
-					RetryInterval:    int(d.RetryInterval),
+					DelayLoop:        types.StringNumber(d.Interval * 60),
+					MaxCheckAttempts: types.StringNumber(1),
+					RetryInterval:    types.StringNumber(d.RetryInterval),
 					Enabled:          types.StringTrue,
-					Timeout:          int(d.TimeoutSeconds),
+					Timeout:          types.StringNumber(d.TimeoutSeconds),
 					HealthCheck:      d.toHealthCheck(),
 					NotifyEmail:      simpleMonitorNotifyEmail{Enabled: types.StringFalse},
 					NotifySlack:      simpleMonitorNotifySlack{Enabled: types.StringTrue, IncomingWebhooksURL: d.WebhookURL},
-					NotifyInterval:   int(d.RepeatInterval),
+					NotifyInterval:   types.StringNumber(d.RepeatInterval),
 				},
 			},
 			Provider: simpleMonitorProvider{Class: "simplemon"},
