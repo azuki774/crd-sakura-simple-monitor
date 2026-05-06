@@ -120,7 +120,7 @@ func (c *Client) Create(ctx context.Context, desired SimpleMonitorDesired) (stri
 	logger.Info("creating SakuraCloud simple monitor", "target", desired.Target, "tags", desired.Tags)
 
 	reqBody := desired.toCreateRequestBody()
-	data, err := c.sakuraCaller.Do(ctx, "POST", sakuraCloudAPIPath, reqBody)
+	data, err := c.sakuraCaller.Do(ctx, "POST", iaas.SakuraCloudAPIRoot+sakuraCloudAPIPath, reqBody)
 	if err != nil {
 		logSakuraAPIError(logger, "create", err)
 		return "", err
