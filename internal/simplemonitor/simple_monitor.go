@@ -15,6 +15,7 @@ type SimpleMonitorClient interface {
 	Create(ctx context.Context, desired SimpleMonitorDesired) (string, error)
 	Read(ctx context.Context, id string) error
 	Update(ctx context.Context, id string, desired SimpleMonitorDesired) error
+	HealthStatus(ctx context.Context, id string) (monitoringv1alpha1.HealthStatus, error)
 }
 
 // SimpleMonitorDesired is the SakuraCloud simple monitor shape derived from the Kubernetes resource.
