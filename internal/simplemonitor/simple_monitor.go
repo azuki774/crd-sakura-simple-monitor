@@ -27,6 +27,7 @@ type SimpleMonitorDesired struct {
 	Path           string
 	ExpectedStatus int32
 	TimeoutSeconds int32
+	HTTP2          bool
 	Interval       int32
 	RetryInterval  int32
 	WebhookURL     string

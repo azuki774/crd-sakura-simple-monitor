@@ -44,6 +44,10 @@ type HealthCheckSpec struct {
 	// TimeoutSeconds is the request timeout in seconds.
 	// +kubebuilder:validation:Minimum=1
 	TimeoutSeconds int32 `json:"timeoutSeconds"`
+
+	// HTTP2 enables HTTP/2 for HTTPS checks.
+	// +optional
+	HTTP2 bool `json:"http2,omitempty"`
 }
 
 // NotificationsSpec defines the outbound webhook notification settings.

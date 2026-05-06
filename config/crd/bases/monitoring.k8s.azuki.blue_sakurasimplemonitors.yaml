@@ -66,6 +66,9 @@ spec:
                     maximum: 599
                     minimum: 100
                     type: integer
+                  http2:
+                    description: HTTP2 enables HTTP/2 for HTTPS checks.
+                    type: boolean
                   path:
                     description: Path is the HTTP request path.
                     minLength: 1
