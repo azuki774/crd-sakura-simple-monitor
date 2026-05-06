@@ -17,7 +17,7 @@ const (
 	maxSakuraTags = 10
 	// sakuraCloudAPIPath is the API endpoint for CommonServiceItem (SimpleMonitor uses this resource type).
 	// See: https://manual.sakura.ad.jp/cloud/api/api-resource-commonserviceitem/
-	sakuraCloudAPIPath = "/cloud/zone/is1a/api/cloud/1.1/commonserviceitem"
+	sakuraCloudAPIPath = "/is1a/api/cloud/1.1/commonserviceitem"
 )
 
 var sakuraTagPattern = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._@-]*$`)
@@ -120,7 +120,7 @@ func (c *Client) Create(ctx context.Context, desired SimpleMonitorDesired) (stri
 	logger.Info("creating SakuraCloud simple monitor", "target", desired.Target, "tags", desired.Tags)
 
 	reqBody := desired.toCreateRequestBody()
-	data, err := c.sakuraCaller.Do(ctx, "POST", sakuraCloudAPIPath, reqBody)
+	data, err := c.sakuraCaller.Do(ctx, "POST", iaas.SakuraCloudAPIRoot+sakuraCloudAPIPath, reqBody)
 	if err != nil {
 		logSakuraAPIError(logger, "create", err)
 		return "", err
