@@ -11,7 +11,7 @@ import (
 	iaas "github.com/sacloud/iaas-api-go"
 )
 
-func TestClientCreateUsesCommonServiceItemEndpointAndBody(t *testing.T) {
+func TestClientCreateUsesSDKCommonServiceItemEndpointAndBody(t *testing.T) {
 	caller := &recordingAPICaller{
 		response: []byte(`{"CommonServiceItem":{"ID":"123456789012"},"is_ok":true}`),
 	}
@@ -66,11 +66,11 @@ func TestClientCreateUsesCommonServiceItemEndpointAndBody(t *testing.T) {
 	assertJSONValue(t, item, "Name", "192.0.2.100")
 	assertJSONValue(t, status, "Target", "192.0.2.100")
 	assertJSONValue(t, provider, "Class", "simplemon")
-	assertJSONValue(t, simpleMon, "DelayLoop", "60")
+	assertJSONValue(t, simpleMon, "DelayLoop", float64(60))
 	assertJSONValue(t, simpleMon, "Enabled", "True")
-	assertJSONValue(t, simpleMon, "Timeout", "10")
-	assertJSONValue(t, simpleMon, "RetryInterval", "20")
-	assertJSONValue(t, simpleMon, "NotifyInterval", "7200")
+	assertJSONValue(t, simpleMon, "Timeout", float64(10))
+	assertJSONValue(t, simpleMon, "RetryInterval", float64(20))
+	assertJSONValue(t, simpleMon, "NotifyInterval", float64(7200))
 	assertJSONValue(t, healthCheck, "Protocol", "http")
 	assertJSONValue(t, healthCheck, "Path", "/")
 	assertJSONValue(t, healthCheck, "Status", "200")
