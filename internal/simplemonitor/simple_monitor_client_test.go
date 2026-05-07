@@ -87,6 +87,79 @@ func TestClientCreateUsesSDKCommonServiceItemEndpointAndBody(t *testing.T) {
 	}
 }
 
+func TestClientCheckSyncedReadsEndpointAndAcceptsMatchingMonitor(t *testing.T) {
+	caller := &recordingAPICaller{
+		response: []byte(`{
+			"CommonServiceItem": {
+				"ID": "123456789012",
+				"Name": "example.com",
+				"Description": "test monitor",
+				"Tags": [],
+				"Status": {"Target": "example.com"},
+				"Settings": {
+					"SimpleMonitor": {
+						"DelayLoop": 60,
+						"RetryInterval": 20,
+						"MaxCheckAttempts": 1,
+						"Enabled": "True",
+						"Timeout": 10,
+						"NotifyInterval": 7200,
+						"NotifyEmail": {"Enabled": "False", "HTML": "False"},
+						"NotifySlack": {
+							"Enabled": "True",
+							"IncomingWebhooksURL": "https://example.com/webhook"
+						},
+						"HealthCheck": {
+							"Protocol": "https",
+							"Host": "example.com",
+							"Port": "443",
+							"Path": "/healthz",
+							"Status": "200",
+							"SNI": "True",
+							"HTTP2": "False"
+						}
+					}
+				}
+			},
+			"is_ok": true
+		}`),
+	}
+	client := NewClient(caller)
+
+	err := client.CheckSynced(context.Background(), "123456789012", validSimpleMonitorDesired())
+	if err != nil {
+		t.Fatalf("CheckSynced() error = %v", err)
+	}
+	if caller.method != http.MethodGet {
+		t.Fatalf("CheckSynced() method = %q, want %q", caller.method, http.MethodGet)
+	}
+	wantURI := iaas.SakuraCloudAPIRoot + "/is1a/api/cloud/1.1/commonserviceitem/123456789012"
+	if caller.uri != wantURI {
+		t.Fatalf("CheckSynced() uri = %q, want %q", caller.uri, wantURI)
+	}
+	if caller.body != nil {
+		t.Fatalf("CheckSynced() body = %#v, want nil", caller.body)
+	}
+}
+
+func TestSimpleMonitorDesiredMatchesSakuraSimpleMonitor(t *testing.T) {
+	desired := validSimpleMonitorDesired()
+	actual := desired.toSakuraSimpleMonitorForTest()
+
+	if err := desired.matchesSakuraSimpleMonitor(actual); err != nil {
+		t.Fatalf("matchesSakuraSimpleMonitor() error = %v", err)
+	}
+
+	actual.HealthCheck.Path = "/drifted"
+	err := desired.matchesSakuraSimpleMonitor(actual)
+	if err == nil {
+		t.Fatal("matchesSakuraSimpleMonitor() error = nil, want drift error")
+	}
+	if !strings.Contains(err.Error(), "healthCheck.path") {
+		t.Fatalf("matchesSakuraSimpleMonitor() error = %q, want healthCheck.path", err.Error())
+	}
+}
+
 func TestSimpleMonitorDesiredValidateSakuraRequestShapeTags(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -250,5 +323,25 @@ func validSimpleMonitorDesired() SimpleMonitorDesired {
 		RetryInterval:  20,
 		WebhookURL:     "https://example.com/webhook",
 		RepeatInterval: 7200,
+	}
+}
+
+func (d SimpleMonitorDesired) toSakuraSimpleMonitorForTest() *iaas.SimpleMonitor {
+	req := d.toCreateRequest()
+	return &iaas.SimpleMonitor{
+		Target:             req.Target,
+		Description:        req.Description,
+		Tags:               req.Tags,
+		MaxCheckAttempts:   req.MaxCheckAttempts,
+		RetryInterval:      req.RetryInterval,
+		DelayLoop:          req.DelayLoop,
+		Enabled:            req.Enabled,
+		HealthCheck:        req.HealthCheck,
+		NotifyEmailEnabled: req.NotifyEmailEnabled,
+		NotifyEmailHTML:    req.NotifyEmailHTML,
+		NotifySlackEnabled: req.NotifySlackEnabled,
+		SlackWebhooksURL:   req.SlackWebhooksURL,
+		NotifyInterval:     req.NotifyInterval,
+		Timeout:            req.Timeout,
 	}
 }

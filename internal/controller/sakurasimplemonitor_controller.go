@@ -10,8 +10,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	monitoringv1alpha1 "github.com/azuki774/crd-sakura-simple-monitor/api/v1alpha1"
 	"github.com/azuki774/crd-sakura-simple-monitor/internal/simplemonitor"
@@ -22,6 +24,8 @@ const (
 
 	syncReasonSucceeded = "SyncSucceeded"
 	syncReasonFailed    = "SyncFailed"
+
+	syncVerificationInterval = 24 * time.Hour
 )
 
 // SakuraSimpleMonitorReconciler reconciles a SakuraSimpleMonitor object
@@ -53,12 +57,16 @@ func (r *SakuraSimpleMonitorReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, nil
 	}
 
-	if r.SakuraSimpleMonitor == nil {
-		err := errors.New("sakura simple monitor client is not configured")
-		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, err)
+	desired := desiredSimpleMonitor(monitor)
+	if monitor.Status.ObservedGeneration == monitor.Generation {
+		return r.reconcileProcessedGeneration(ctx, monitor, desired)
 	}
 
-	desired := desiredSimpleMonitor(monitor)
+	if r.SakuraSimpleMonitor == nil {
+		err := errors.New("sakura simple monitor client is not configured")
+		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitor.Status.MonitorID, err)
+	}
+
 	var monitorID string
 	var err error
 
@@ -66,27 +74,26 @@ func (r *SakuraSimpleMonitorReconciler) Reconcile(ctx context.Context, req ctrl.
 		monitorID, err = r.SakuraSimpleMonitor.Create(ctx, desired)
 	} else {
 		monitorID = monitor.Status.MonitorID
-		err = r.SakuraSimpleMonitor.Read(ctx, monitorID)
+		err = r.SakuraSimpleMonitor.Update(ctx, monitorID, desired)
 		if errors.Is(err, simplemonitor.ErrSimpleMonitorNotFound) {
 			monitorID, err = r.SakuraSimpleMonitor.Create(ctx, desired)
-		} else if err == nil {
-			err = r.SakuraSimpleMonitor.Update(ctx, monitorID, desired)
 		}
 	}
 
 	if err != nil {
 		logger.Error(err, "failed to synchronize SakuraCloud simple monitor", "monitorID", monitor.Status.MonitorID)
-		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, err)
+		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitorID, err)
 	}
 
 	if monitorID == "" {
 		err = errors.New("sakura simple monitor API returned an empty monitor ID")
-		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, err)
+		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitorID, err)
 	}
 
 	health := monitoringv1alpha1.HealthStatusUnknown
 	if observedHealth, err := r.SakuraSimpleMonitor.HealthStatus(ctx, monitorID); err != nil {
 		logger.Error(err, "failed to read SakuraCloud simple monitor health status", "monitorID", monitorID)
+		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitorID, err)
 	} else {
 		health = observedHealth
 	}
@@ -101,13 +108,13 @@ func (r *SakuraSimpleMonitorReconciler) Reconcile(ctx context.Context, req ctrl.
 		"health", health,
 	)
 
-	return ctrl.Result{}, r.setSyncSucceeded(ctx, monitor, monitorID, health)
+	return ctrl.Result{RequeueAfter: syncVerificationInterval}, r.setSyncSucceeded(ctx, monitor, monitorID, health)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *SakuraSimpleMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&monitoringv1alpha1.SakuraSimpleMonitor{}).
+		For(&monitoringv1alpha1.SakuraSimpleMonitor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("sakurasimplemonitor").
 		Complete(r)
 }
@@ -127,6 +134,76 @@ func desiredSimpleMonitor(monitor *monitoringv1alpha1.SakuraSimpleMonitor) simpl
 		WebhookURL:     monitor.Spec.Notifications.WebhookURL,
 		RepeatInterval: monitor.Spec.Notifications.RepeatInterval,
 	}
+}
+
+func (r *SakuraSimpleMonitorReconciler) reconcileProcessedGeneration(
+	ctx context.Context,
+	monitor *monitoringv1alpha1.SakuraSimpleMonitor,
+	desired simplemonitor.SimpleMonitorDesired,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if !isSyncSucceeded(monitor) {
+		logger.Info(
+			"SakuraCloud simple monitor is already failed for this generation",
+			"name", monitor.Name,
+			"namespace", monitor.Namespace,
+			"generation", monitor.Generation,
+			"monitorID", monitor.Status.MonitorID,
+		)
+		return ctrl.Result{}, nil
+	}
+
+	if remaining := r.syncVerificationRemaining(monitor); remaining > 0 {
+		logger.Info(
+			"SakuraCloud simple monitor synchronization verification is not due",
+			"name", monitor.Name,
+			"namespace", monitor.Namespace,
+			"generation", monitor.Generation,
+			"monitorID", monitor.Status.MonitorID,
+			"requeueAfter", remaining,
+		)
+		return ctrl.Result{RequeueAfter: remaining}, nil
+	}
+
+	if r.SakuraSimpleMonitor == nil {
+		err := errors.New("sakura simple monitor client is not configured")
+		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitor.Status.MonitorID, err)
+	}
+
+	if monitor.Status.MonitorID == "" {
+		err := errors.New("sakura simple monitor ID is empty during synchronization verification")
+		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitor.Status.MonitorID, err)
+	}
+
+	if err := r.SakuraSimpleMonitor.CheckSynced(ctx, monitor.Status.MonitorID, desired); err != nil {
+		logger.Error(err, "failed to verify SakuraCloud simple monitor synchronization", "monitorID", monitor.Status.MonitorID)
+		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitor.Status.MonitorID, err)
+	}
+
+	logger.Info(
+		"verified SakuraCloud simple monitor synchronization",
+		"name", monitor.Name,
+		"namespace", monitor.Namespace,
+		"generation", monitor.Generation,
+		"monitorID", monitor.Status.MonitorID,
+	)
+	return ctrl.Result{RequeueAfter: syncVerificationInterval}, r.setSyncSucceeded(ctx, monitor, monitor.Status.MonitorID, monitor.Status.Health)
+}
+
+func isSyncSucceeded(monitor *monitoringv1alpha1.SakuraSimpleMonitor) bool {
+	condition := meta.FindStatusCondition(monitor.Status.Conditions, conditionTypeSynced)
+	return condition != nil && condition.Status == metav1.ConditionTrue
+}
+
+func (r *SakuraSimpleMonitorReconciler) syncVerificationRemaining(monitor *monitoringv1alpha1.SakuraSimpleMonitor) time.Duration {
+	if monitor.Status.LastSyncedAt == nil {
+		return 0
+	}
+	remaining := syncVerificationInterval - r.now().Sub(monitor.Status.LastSyncedAt.Time)
+	if remaining <= 0 {
+		return 0
+	}
+	return remaining
 }
 
 func (r *SakuraSimpleMonitorReconciler) setSyncSucceeded(
@@ -153,7 +230,12 @@ func (r *SakuraSimpleMonitorReconciler) setSyncSucceeded(
 	})
 }
 
-func (r *SakuraSimpleMonitorReconciler) setSyncFailed(ctx context.Context, monitor *monitoringv1alpha1.SakuraSimpleMonitor, syncErr error) error {
+func (r *SakuraSimpleMonitorReconciler) setSyncFailed(
+	ctx context.Context,
+	monitor *monitoringv1alpha1.SakuraSimpleMonitor,
+	monitorID string,
+	syncErr error,
+) error {
 	condition := metav1.Condition{
 		Type:               conditionTypeSynced,
 		Status:             metav1.ConditionFalse,
@@ -162,14 +244,13 @@ func (r *SakuraSimpleMonitorReconciler) setSyncFailed(ctx context.Context, monit
 		Message:            syncErr.Error(),
 	}
 
-	statusErr := r.patchStatus(ctx, monitor, func(status *monitoringv1alpha1.SakuraSimpleMonitorStatus) {
+	return r.patchStatus(ctx, monitor, func(status *monitoringv1alpha1.SakuraSimpleMonitorStatus) {
+		if monitorID != "" {
+			status.MonitorID = monitorID
+		}
 		status.ObservedGeneration = monitor.Generation
 		meta.SetStatusCondition(&status.Conditions, condition)
 	})
-	if statusErr != nil {
-		return errors.Join(syncErr, statusErr)
-	}
-	return syncErr
 }
 
 func (r *SakuraSimpleMonitorReconciler) patchStatus(

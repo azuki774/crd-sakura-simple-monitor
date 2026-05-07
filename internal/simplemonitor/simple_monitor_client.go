@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 
 	monitoringv1alpha1 "github.com/azuki774/crd-sakura-simple-monitor/api/v1alpha1"
 	"github.com/go-logr/logr"
@@ -70,20 +71,31 @@ func (c *Client) Create(ctx context.Context, desired SimpleMonitorDesired) (stri
 	return monitorID, nil
 }
 
-func (c *Client) Read(ctx context.Context, id string) error {
+func (c *Client) CheckSynced(ctx context.Context, id string, desired SimpleMonitorDesired) error {
+	if err := desired.validateSakuraRequestShape(); err != nil {
+		return err
+	}
 	logger := log.FromContext(ctx).WithName("sakura-simple-monitor")
-	logger.Info("reading SakuraCloud simple monitor", "monitorID", id)
-	_, err := c.op.Read(ctx, types.StringID(id))
+	logger.Info("checking SakuraCloud simple monitor synchronization", "monitorID", id, "target", desired.Target)
+
+	actual, err := c.op.Read(ctx, types.StringID(id))
 	if iaas.IsNotFoundError(err) {
-		logger.Info("SakuraCloud simple monitor was not found", "monitorID", id)
+		logger.Info("SakuraCloud simple monitor was not found during synchronization check", "monitorID", id)
 		return ErrSimpleMonitorNotFound
 	}
 	if err != nil {
-		logSakuraAPIError(logger, "read", err)
+		logSakuraAPIError(logger, "checkSynced", err)
 		return err
 	}
-	logger.Info("read SakuraCloud simple monitor", "monitorID", id)
-	return err
+	if actual == nil {
+		return errors.New("SakuraCloud API returned an empty simple monitor")
+	}
+	if err := desired.matchesSakuraSimpleMonitor(actual); err != nil {
+		return err
+	}
+
+	logger.Info("checked SakuraCloud simple monitor synchronization", "monitorID", id, "target", desired.Target)
+	return nil
 }
 
 func logSakuraAPIError(logger logr.Logger, operation string, err error) {
@@ -232,6 +244,61 @@ func (d SimpleMonitorDesired) toIAASHealthCheck() *iaas.SimpleMonitorHealthCheck
 		HTTP2:    types.StringFlag(d.HTTP2),
 		Host:     d.Target,
 	}
+}
+
+func (d SimpleMonitorDesired) matchesSakuraSimpleMonitor(actual *iaas.SimpleMonitor) error {
+	expected := d.toCreateRequest()
+	mismatches := []string{}
+	compare := func(field string, actual, expected interface{}) {
+		if actual != expected {
+			mismatches = append(mismatches, field)
+		}
+	}
+
+	compare("target", actual.Target, expected.Target)
+	compare("description", actual.Description, expected.Description)
+	if !sameStringSet([]string(actual.Tags), []string(expected.Tags)) {
+		mismatches = append(mismatches, "tags")
+	}
+	compare("maxCheckAttempts", actual.MaxCheckAttempts, expected.MaxCheckAttempts)
+	compare("retryInterval", actual.RetryInterval, expected.RetryInterval)
+	compare("delayLoop", actual.DelayLoop, expected.DelayLoop)
+	compare("enabled", actual.Enabled, expected.Enabled)
+	compare("notifyEmailEnabled", actual.NotifyEmailEnabled, expected.NotifyEmailEnabled)
+	compare("notifyEmailHTML", actual.NotifyEmailHTML, expected.NotifyEmailHTML)
+	compare("notifySlackEnabled", actual.NotifySlackEnabled, expected.NotifySlackEnabled)
+	compare("slackWebhooksURL", actual.SlackWebhooksURL, expected.SlackWebhooksURL)
+	compare("notifyInterval", actual.NotifyInterval, expected.NotifyInterval)
+	compare("timeout", actual.Timeout, expected.Timeout)
+
+	if actual.HealthCheck == nil {
+		mismatches = append(mismatches, "healthCheck")
+	} else {
+		expectedHealthCheck := expected.HealthCheck
+		compare("healthCheck.protocol", actual.HealthCheck.Protocol, expectedHealthCheck.Protocol)
+		compare("healthCheck.port", actual.HealthCheck.Port, expectedHealthCheck.Port)
+		compare("healthCheck.path", actual.HealthCheck.Path, expectedHealthCheck.Path)
+		compare("healthCheck.status", actual.HealthCheck.Status, expectedHealthCheck.Status)
+		compare("healthCheck.sni", actual.HealthCheck.SNI, expectedHealthCheck.SNI)
+		compare("healthCheck.host", actual.HealthCheck.Host, expectedHealthCheck.Host)
+		compare("healthCheck.http2", actual.HealthCheck.HTTP2, expectedHealthCheck.HTTP2)
+	}
+
+	if len(mismatches) > 0 {
+		return fmt.Errorf("SakuraCloud simple monitor is out of sync: %v", mismatches)
+	}
+	return nil
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	sortedA := slices.Clone(a)
+	sortedB := slices.Clone(b)
+	slices.Sort(sortedA)
+	slices.Sort(sortedB)
+	return slices.Equal(sortedA, sortedB)
 }
 
 func (d SimpleMonitorDesired) validateSakuraRequestShape() error {

@@ -11,12 +11,9 @@ import (
 	"time"
 
 	"github.com/azuki774/crd-sakura-simple-monitor/internal/logger"
-	"github.com/hashicorp/go-retryablehttp"
 	client "github.com/sacloud/api-client-go"
 	iaas "github.com/sacloud/iaas-api-go"
 )
-
-const maxRetryResponseBodyLogBytes = 4096
 
 // SakuraAPICaller records SakuraCloud API access logs without request or response bodies.
 type SakuraAPICaller struct {
@@ -42,17 +39,12 @@ func NewSakuraAPICallerFromEnv(log logger.Logger) *SakuraAPICaller {
 
 // NewSakuraAPICallerWithOptions creates a SakuraCloud API caller with access logs from explicit options.
 func NewSakuraAPICallerWithOptions(opts *client.Options, log logger.Logger) *SakuraAPICaller {
-	if len(opts.CheckRetryStatusCodes) == 0 {
-		opts.CheckRetryStatusCodes = []int{
-			http.StatusServiceUnavailable,
-			http.StatusLocked,
-		}
-	}
 	if opts.UserAgent == "" {
 		opts.UserAgent = iaas.DefaultUserAgent
 	}
 	accessLogger := namedLogger(log)
-	opts.CheckRetryFunc = retryLoggingCheckRetryFunc(opts.CheckRetryFunc, opts.CheckRetryStatusCodes, accessLogger)
+	opts.CheckRetryFunc = noRetryCheckRetryFunc
+	opts.CheckRetryStatusCodes = nil
 	return &SakuraAPICaller{
 		factory: client.NewFactory(opts),
 		logger:  accessLogger,
@@ -164,175 +156,11 @@ func (c *SakuraAPICaller) logFailure(ctx context.Context, method, uri string, du
 	c.logger.Error(ctx, err, "SakuraCloud API access failed", values...)
 }
 
-func retryLoggingCheckRetryFunc(
-	base func(context.Context, *http.Response, error) (bool, error),
-	retryStatusCodes []int,
-	log logger.Logger,
-) func(context.Context, *http.Response, error) (bool, error) {
-	return func(ctx context.Context, resp *http.Response, err error) (bool, error) {
-		shouldRetry, retryErr := shouldRetrySakuraAPIRequest(ctx, resp, err, base, retryStatusCodes)
-		if shouldRetry {
-			logRetryableResponse(ctx, log, resp, err, retryErr)
-		}
-		return shouldRetry, retryErr
-	}
-}
-
-func shouldRetrySakuraAPIRequest(
-	ctx context.Context,
-	resp *http.Response,
-	err error,
-	base func(context.Context, *http.Response, error) (bool, error),
-	retryStatusCodes []int,
-) (bool, error) {
-	if base != nil {
-		return base(ctx, resp, err)
-	}
+func noRetryCheckRetryFunc(ctx context.Context, _ *http.Response, _ error) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
-	if err != nil {
-		return retryablehttp.DefaultRetryPolicy(ctx, resp, err)
-	}
-	if resp == nil {
-		return false, nil
-	}
-	for _, status := range retryStatusCodes {
-		if resp.StatusCode == status {
-			return true, nil
-		}
-	}
 	return false, nil
-}
-
-func logRetryableResponse(ctx context.Context, log logger.Logger, resp *http.Response, err, retryErr error) {
-	values := []interface{}{}
-	if resp != nil {
-		method := ""
-		uri := ""
-		if resp.Request != nil {
-			method = resp.Request.Method
-			if resp.Request.URL != nil {
-				uri = sanitizeAccessLogURI(resp.Request.URL.String())
-			}
-		}
-		values = append(values,
-			"method", method,
-			"uri", uri,
-			"statusCode", resp.StatusCode,
-		)
-		if requestValues, readErr := sanitizedRetryRequestValues(resp.Request); readErr != nil {
-			values = append(values, "requestSummaryReadError", readErr.Error())
-		} else {
-			values = append(values, requestValues...)
-		}
-
-		body, truncated, readErr := readAndRestoreResponseBody(resp, maxRetryResponseBodyLogBytes)
-		if readErr != nil {
-			values = append(values, "responseBodyReadError", readErr.Error())
-		} else {
-			values = append(values, "responseBody", body, "responseBodyTruncated", truncated)
-		}
-	}
-	if retryErr != nil {
-		values = append(values, "retryError", retryErr.Error())
-	}
-	if err != nil {
-		log.Error(ctx, err, "SakuraCloud API retrying after transport error", values...)
-		return
-	}
-	log.Info(ctx, "SakuraCloud API retrying after response", values...)
-}
-
-func sanitizedRetryRequestValues(req *http.Request) ([]interface{}, error) {
-	if req == nil || req.GetBody == nil {
-		return nil, nil
-	}
-	bodyReader, err := req.GetBody()
-	if err != nil {
-		return nil, err
-	}
-	defer bodyReader.Close() //nolint:errcheck
-
-	body, err := io.ReadAll(bodyReader)
-	if err != nil {
-		return nil, err
-	}
-
-	var payload map[string]interface{}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("request body is not JSON: %w", err)
-	}
-	return sakuraCommonServiceItemRequestSummary(payload), nil
-}
-
-func sakuraCommonServiceItemRequestSummary(payload map[string]interface{}) []interface{} {
-	item := nestedMap(payload, "CommonServiceItem")
-	if item == nil {
-		return nil
-	}
-
-	status := nestedMap(item, "Status")
-	provider := nestedMap(item, "Provider")
-	settings := nestedMap(item, "Settings")
-	simpleMonitor := nestedMap(settings, "SimpleMonitor")
-	healthCheck := nestedMap(simpleMonitor, "HealthCheck")
-	notifyEmail := nestedMap(simpleMonitor, "NotifyEmail")
-	notifySlack := nestedMap(simpleMonitor, "NotifySlack")
-
-	return []interface{}{
-		"requestProviderClass", provider["Class"],
-		"requestName", item["Name"],
-		"requestStatusTarget", status["Target"],
-		"requestDelayLoop", simpleMonitor["DelayLoop"],
-		"requestRetryInterval", simpleMonitor["RetryInterval"],
-		"requestMaxCheckAttempts", simpleMonitor["MaxCheckAttempts"],
-		"requestEnabled", simpleMonitor["Enabled"],
-		"requestTimeout", simpleMonitor["Timeout"],
-		"requestNotifyInterval", simpleMonitor["NotifyInterval"],
-		"requestNotifyEmailEnabled", notifyEmail["Enabled"],
-		"requestNotifySlackEnabled", notifySlack["Enabled"],
-		"requestSlackWebhookURLConfigured", notifySlack["IncomingWebhooksURL"] != nil && notifySlack["IncomingWebhooksURL"] != "",
-		"requestHealthCheckProtocol", healthCheck["Protocol"],
-		"requestHealthCheckHost", healthCheck["Host"],
-		"requestHealthCheckPort", healthCheck["Port"],
-		"requestHealthCheckPath", healthCheck["Path"],
-		"requestHealthCheckStatus", healthCheck["Status"],
-		"requestHealthCheckSNI", healthCheck["SNI"],
-		"requestHealthCheckHTTP2", healthCheck["HTTP2"],
-		"requestHealthCheckVerifySNI", healthCheck["VerifySNI"],
-	}
-}
-
-func nestedMap(parent map[string]interface{}, key string) map[string]interface{} {
-	if parent == nil {
-		return map[string]interface{}{}
-	}
-	child, ok := parent[key].(map[string]interface{})
-	if !ok {
-		return map[string]interface{}{}
-	}
-	return child
-}
-
-func readAndRestoreResponseBody(resp *http.Response, limit int64) (string, bool, error) {
-	if resp.Body == nil {
-		return "", false, nil
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	closeErr := resp.Body.Close()
-	if err != nil {
-		return "", false, err
-	}
-	if closeErr != nil {
-		return "", false, closeErr
-	}
-	truncated := int64(len(body)) > limit
-	if truncated {
-		body = body[:limit]
-	}
-	resp.Body = io.NopCloser(bytes.NewReader(body))
-	return string(body), truncated, nil
 }
 
 func accessLogValues(method, uri string, duration time.Duration) []interface{} {

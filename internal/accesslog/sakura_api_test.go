@@ -3,6 +3,7 @@ package accesslog
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -88,53 +89,45 @@ var _ = Describe("SakuraCloud API access log", func() {
 		}),
 	)
 
+	It("records one failure without HTTP retry for retryable statuses", func() {
+		var records bytes.Buffer
+		ctx := context.Background()
+		log := logger.NewJSONLogger(&records, slog.LevelInfo)
+		calls := 0
+		caller := NewSakuraAPICallerWithOptions(&client.Options{
+			AccessToken:       "token",
+			AccessTokenSecret: "secret",
+			HttpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{
+					StatusCode: http.StatusServiceUnavailable,
+					Body:       io.NopCloser(strings.NewReader(`{"serial":"serial-503","error_code":"unavailable","error_msg":"unavailable"}`)),
+				}, nil
+			})},
+		}, log)
+
+		data, err := caller.Do(ctx, http.MethodGet, "https://secure.sakura.ad.jp/cloud/zone/is1a/api/cloud/1.1/simplemonitor", nil)
+
+		Expect(data).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(calls).To(Equal(1))
+		Expect(strings.Split(strings.TrimSpace(records.String()), "\n")).To(HaveLen(1))
+		Expect(records.String()).To(ContainSubstring("SakuraCloud API access failed"))
+		Expect(records.String()).To(ContainSubstring(`"statusCode":503`))
+	})
+
 	It("removes query strings and fragments from logged URIs", func() {
 		// query には認証情報や検索条件が混ざる可能性があるため、ログには含めない。
 		Expect(sanitizeAccessLogURI("https://example.com/path?token=secret#fragment")).To(Equal("https://example.com/path"))
 	})
 
-	It("logs retryable response status and body without consuming the response body", func() {
-		var records bytes.Buffer
+	It("does not retry response failures", func() {
 		ctx := context.Background()
-		log := logger.NewJSONLogger(&records, slog.LevelInfo)
-		requestBody := strings.NewReader(`{
-			"CommonServiceItem": {
-				"Name": "nostr-dev.azuki.blue",
-				"Status": {"Target": "nostr-dev.azuki.blue"},
-				"Provider": {"Class": "simplemon"},
-				"Settings": {
-					"SimpleMonitor": {
-						"DelayLoop": 300,
-						"RetryInterval": 60,
-						"MaxCheckAttempts": 1,
-						"Enabled": "True",
-						"Timeout": 10,
-						"NotifyInterval": 7200,
-						"NotifyEmail": {"Enabled": "False"},
-						"NotifySlack": {
-							"Enabled": "True",
-							"IncomingWebhooksURL": "https://hooks.slack.com/services/secret"
-						},
-						"HealthCheck": {
-							"Protocol": "https",
-							"Host": "nostr-dev.azuki.blue",
-							"Port": "443",
-							"Path": "/",
-							"Status": "200",
-							"SNI": "True",
-							"HTTP2": "False",
-							"VerifySNI": "False",
-							"BasicAuthPassword": "password"
-						}
-					}
-				}
-			}
-		}`)
 		req, err := http.NewRequestWithContext(
 			ctx,
 			http.MethodPost,
 			"https://secure.sakura.ad.jp/cloud/zone/is1a/api/cloud/1.1/commonserviceitem?token=secret",
-			requestBody,
+			strings.NewReader(`{"CommonServiceItem":{"Provider":{"Class":"simplemon"}}}`),
 		)
 		Expect(err).NotTo(HaveOccurred())
 		resp := &http.Response{
@@ -143,29 +136,21 @@ var _ = Describe("SakuraCloud API access log", func() {
 			Body:       io.NopCloser(strings.NewReader(`{"error_msg":"temporary unavailable"}`)),
 		}
 
-		shouldRetry, err := retryLoggingCheckRetryFunc(nil, []int{http.StatusServiceUnavailable}, namedLogger(log))(ctx, resp, nil)
+		shouldRetry, err := noRetryCheckRetryFunc(ctx, resp, nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRetry).To(BeTrue())
+		Expect(shouldRetry).To(BeFalse())
 
 		body, err := io.ReadAll(resp.Body)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(Equal(`{"error_msg":"temporary unavailable"}`))
+	})
 
-		record := records.String()
-		Expect(record).To(ContainSubstring("SakuraCloud API retrying after response"))
-		Expect(record).To(ContainSubstring(`"method":"POST"`))
-		Expect(record).To(ContainSubstring(`"uri":"https://secure.sakura.ad.jp/cloud/zone/is1a/api/cloud/1.1/commonserviceitem"`))
-		Expect(record).NotTo(ContainSubstring("token=secret"))
-		Expect(record).To(ContainSubstring(`"requestProviderClass":"simplemon"`))
-		Expect(record).To(ContainSubstring(`"requestStatusTarget":"nostr-dev.azuki.blue"`))
-		Expect(record).To(ContainSubstring(`"requestHealthCheckProtocol":"https"`))
-		Expect(record).To(ContainSubstring(`"requestHealthCheckHTTP2":"False"`))
-		Expect(record).To(ContainSubstring(`"requestSlackWebhookURLConfigured":true`))
-		Expect(record).NotTo(ContainSubstring("hooks.slack.com"))
-		Expect(record).NotTo(ContainSubstring("password"))
-		Expect(record).To(ContainSubstring(`"statusCode":503`))
-		Expect(record).To(ContainSubstring(`"responseBody":"{\"error_msg\":\"temporary unavailable\"}"`))
-		Expect(record).To(ContainSubstring(`"responseBodyTruncated":false`))
+	It("does not retry transport errors", func() {
+		ctx := context.Background()
+
+		shouldRetry, err := noRetryCheckRetryFunc(ctx, nil, errors.New("connection reset"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRetry).To(BeFalse())
 	})
 })
 
