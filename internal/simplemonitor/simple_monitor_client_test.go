@@ -9,7 +9,6 @@ import (
 
 	monitoringv1alpha1 "github.com/azuki774/crd-sakura-simple-monitor/api/v1alpha1"
 	iaas "github.com/sacloud/iaas-api-go"
-	"github.com/sacloud/iaas-api-go/types"
 )
 
 func TestClientCreateUsesSDKCommonServiceItemEndpointAndBody(t *testing.T) {
@@ -221,68 +220,6 @@ func TestSimpleMonitorDesiredValidateSakuraRequestShapeTags(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("validateSakuraRequestShape() error = %q, want substring %q", err.Error(), tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestClientHealthStatusReadsEndpointAndMapsHealth(t *testing.T) {
-	caller := &recordingAPICaller{
-		response: []byte(`{"SimpleMonitor":{"Health":"UP"},"is_ok":true}`),
-	}
-	client := NewClient(caller)
-
-	health, err := client.HealthStatus(context.Background(), "123456789012")
-	if err != nil {
-		t.Fatalf("HealthStatus() error = %v", err)
-	}
-	if health != monitoringv1alpha1.HealthStatusHealthy {
-		t.Fatalf("HealthStatus() = %q, want %q", health, monitoringv1alpha1.HealthStatusHealthy)
-	}
-	if caller.method != http.MethodGet {
-		t.Fatalf("HealthStatus() method = %q, want %q", caller.method, http.MethodGet)
-	}
-	wantURI := iaas.SakuraCloudAPIRoot + "/is1a/api/cloud/1.1/commonserviceitem/123456789012/health"
-	if caller.uri != wantURI {
-		t.Fatalf("HealthStatus() uri = %q, want %q", caller.uri, wantURI)
-	}
-	if caller.body != nil {
-		t.Fatalf("HealthStatus() body = %#v, want nil", caller.body)
-	}
-}
-
-func TestMapSakuraHealthStatus(t *testing.T) {
-	tests := []struct {
-		name   string
-		health types.ESimpleMonitorHealth
-		want   monitoringv1alpha1.HealthStatus
-	}{
-		{
-			name:   "maps up to healthy",
-			health: types.SimpleMonitorHealth.Up,
-			want:   monitoringv1alpha1.HealthStatusHealthy,
-		},
-		{
-			name:   "maps down to not healthy",
-			health: types.SimpleMonitorHealth.Down,
-			want:   monitoringv1alpha1.HealthStatusNotHealthy,
-		},
-		{
-			name:   "maps empty to unknown",
-			health: "",
-			want:   monitoringv1alpha1.HealthStatusUnknown,
-		},
-		{
-			name:   "maps unexpected value to unknown",
-			health: types.ESimpleMonitorHealth("MAINTENANCE"),
-			want:   monitoringv1alpha1.HealthStatusUnknown,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := mapSakuraHealthStatus(tt.health); got != tt.want {
-				t.Fatalf("mapSakuraHealthStatus() = %q, want %q", got, tt.want)
 			}
 		})
 	}

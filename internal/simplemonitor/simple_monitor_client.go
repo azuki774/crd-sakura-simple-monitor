@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"slices"
 
-	monitoringv1alpha1 "github.com/azuki774/crd-sakura-simple-monitor/api/v1alpha1"
 	"github.com/go-logr/logr"
 	iaas "github.com/sacloud/iaas-api-go"
 	"github.com/sacloud/iaas-api-go/types"
@@ -162,39 +161,6 @@ func (c *Client) Update(ctx context.Context, id string, desired SimpleMonitorDes
 	}
 	logger.Info("updated SakuraCloud simple monitor", "monitorID", id, "target", desired.Target)
 	return err
-}
-
-func (c *Client) HealthStatus(ctx context.Context, id string) (monitoringv1alpha1.HealthStatus, error) {
-	logger := log.FromContext(ctx).WithName("sakura-simple-monitor")
-	logger.Info("reading SakuraCloud simple monitor health status", "monitorID", id)
-
-	healthStatus, err := c.op.HealthStatus(ctx, types.StringID(id))
-	if iaas.IsNotFoundError(err) {
-		logger.Info("SakuraCloud simple monitor was not found during health status read", "monitorID", id)
-		return monitoringv1alpha1.HealthStatusUnknown, ErrSimpleMonitorNotFound
-	}
-	if err != nil {
-		logSakuraAPIError(logger, "healthStatus", err)
-		return monitoringv1alpha1.HealthStatusUnknown, err
-	}
-	if healthStatus == nil {
-		return monitoringv1alpha1.HealthStatusUnknown, nil
-	}
-
-	health := mapSakuraHealthStatus(healthStatus.Health)
-	logger.Info("read SakuraCloud simple monitor health status", "monitorID", id, "health", health)
-	return health, nil
-}
-
-func mapSakuraHealthStatus(health types.ESimpleMonitorHealth) monitoringv1alpha1.HealthStatus {
-	switch {
-	case health.IsUp():
-		return monitoringv1alpha1.HealthStatusHealthy
-	case health.IsDown():
-		return monitoringv1alpha1.HealthStatusNotHealthy
-	default:
-		return monitoringv1alpha1.HealthStatusUnknown
-	}
 }
 
 func (d SimpleMonitorDesired) toCreateRequest() *iaas.SimpleMonitorCreateRequest {

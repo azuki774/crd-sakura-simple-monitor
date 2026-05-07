@@ -23,10 +23,6 @@ type SimpleMonitorClient interface {
 	// Update は保存済み monitor ID の SakuraCloud シンプル監視を desired state に更新する。
 	// spec が変わった generation でだけ呼び出し、Sakura 側で削除済みの場合は ErrSimpleMonitorNotFound を返す。
 	Update(ctx context.Context, id string, desired SimpleMonitorDesired) error
-
-	// HealthStatus は SakuraCloud シンプル監視のヘルス状態を 1 回だけ取得する。
-	// 作成・更新が成功した直後だけ呼び出し、定期 polling には使わない。
-	HealthStatus(ctx context.Context, id string) (monitoringv1alpha1.HealthStatus, error)
 }
 
 // SimpleMonitorDesired is the SakuraCloud simple monitor shape derived from the Kubernetes resource.

@@ -90,14 +90,6 @@ func (r *SakuraSimpleMonitorReconciler) Reconcile(ctx context.Context, req ctrl.
 		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitorID, err)
 	}
 
-	health := monitoringv1alpha1.HealthStatusUnknown
-	if observedHealth, err := r.SakuraSimpleMonitor.HealthStatus(ctx, monitorID); err != nil {
-		logger.Error(err, "failed to read SakuraCloud simple monitor health status", "monitorID", monitorID)
-		return ctrl.Result{}, r.setSyncFailed(ctx, monitor, monitorID, err)
-	} else {
-		health = observedHealth
-	}
-
 	logger.Info(
 		"synchronized SakuraCloud simple monitor",
 		"name", monitor.Name,
@@ -105,10 +97,9 @@ func (r *SakuraSimpleMonitorReconciler) Reconcile(ctx context.Context, req ctrl.
 		"target", monitor.Spec.Target,
 		"protocol", monitor.Spec.HealthCheck.Protocol,
 		"monitorID", monitorID,
-		"health", health,
 	)
 
-	return ctrl.Result{RequeueAfter: syncVerificationInterval}, r.setSyncSucceeded(ctx, monitor, monitorID, health)
+	return ctrl.Result{RequeueAfter: syncVerificationInterval}, r.setSyncSucceeded(ctx, monitor, monitorID)
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -187,7 +178,7 @@ func (r *SakuraSimpleMonitorReconciler) reconcileProcessedGeneration(
 		"generation", monitor.Generation,
 		"monitorID", monitor.Status.MonitorID,
 	)
-	return ctrl.Result{RequeueAfter: syncVerificationInterval}, r.setSyncSucceeded(ctx, monitor, monitor.Status.MonitorID, monitor.Status.Health)
+	return ctrl.Result{RequeueAfter: syncVerificationInterval}, r.setSyncSucceeded(ctx, monitor, monitor.Status.MonitorID)
 }
 
 func isSyncSucceeded(monitor *monitoringv1alpha1.SakuraSimpleMonitor) bool {
@@ -210,7 +201,6 @@ func (r *SakuraSimpleMonitorReconciler) setSyncSucceeded(
 	ctx context.Context,
 	monitor *monitoringv1alpha1.SakuraSimpleMonitor,
 	monitorID string,
-	health monitoringv1alpha1.HealthStatus,
 ) error {
 	now := metav1.NewTime(r.now())
 	condition := metav1.Condition{
@@ -224,7 +214,6 @@ func (r *SakuraSimpleMonitorReconciler) setSyncSucceeded(
 	return r.patchStatus(ctx, monitor, func(status *monitoringv1alpha1.SakuraSimpleMonitorStatus) {
 		status.MonitorID = monitorID
 		status.ObservedGeneration = monitor.Generation
-		status.Health = health
 		status.LastSyncedAt = &now
 		meta.SetStatusCondition(&status.Conditions, condition)
 	})

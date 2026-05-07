@@ -47,7 +47,6 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					resource := createTestMonitor(ctx, "create-resource")
 					return reconcile.Request{NamespacedName: clientKey(resource)}, &fakeSimpleMonitorClient{
 						createID: "123456789012",
-						health:   monitoringv1alpha1.HealthStatusHealthy,
 					}
 				},
 				wantErr: expectNoReconcileError,
@@ -63,10 +62,8 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 
 					fetched := getTestMonitor(ctx, "create-resource")
 					Expect(fetched.Status.MonitorID).To(Equal("123456789012"))
-					Expect(fetched.Status.Health).To(Equal(monitoringv1alpha1.HealthStatusHealthy))
 					Expect(fetched.Status.ObservedGeneration).To(Equal(fetched.Generation))
 					Expect(fetched.Status.LastSyncedAt).NotTo(BeNil())
-					Expect(fakeSakura.healthReads).To(Equal([]string{"123456789012"}))
 					condition := findCondition(fetched.Status.Conditions, conditionTypeSynced)
 					Expect(condition).NotTo(BeNil())
 					Expect(condition.Status).To(Equal(metav1.ConditionTrue))
@@ -87,7 +84,6 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(fakeSakura.updates[0].id).To(Equal("123456789012"))
 					Expect(fakeSakura.updates[0].desired.Tags).To(BeEmpty())
 					Expect(fakeSakura.creates).To(BeEmpty())
-					Expect(fakeSakura.healthReads).To(Equal([]string{"123456789012"}))
 				},
 			}),
 			// Sakura 側リソースが手動削除された場合は、CR の desired state から再作成して monitorID を差し替える。
@@ -99,7 +95,6 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					return reconcile.Request{NamespacedName: clientKey(resource)}, &fakeSimpleMonitorClient{
 						createID:  "234567890123",
 						updateErr: simplemonitor.ErrSimpleMonitorNotFound,
-						health:    monitoringv1alpha1.HealthStatusNotHealthy,
 					}
 				},
 				wantErr: expectNoReconcileError,
@@ -110,7 +105,6 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 
 					fetched := getTestMonitor(ctx, "recreate-resource")
 					Expect(fetched.Status.MonitorID).To(Equal("234567890123"))
-					Expect(fetched.Status.Health).To(Equal(monitoringv1alpha1.HealthStatusNotHealthy))
 				},
 			}),
 			// Sakura API エラーは Kubernetes 側 status に失敗 Condition として残し、controller-runtime の自動再試行は起こさない。
@@ -134,28 +128,6 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(condition.Status).To(Equal(metav1.ConditionFalse))
 					Expect(condition.Reason).To(Equal(syncReasonFailed))
 					Expect(condition.Message).To(ContainSubstring("sakura api unavailable"))
-				},
-			}),
-			// ヘルス取得に失敗した場合もエラー状態で止めるが、作成済み monitorID は保存して重複作成を避ける。
-			Entry("stores the monitor ID with unknown health when health status read fails", reconcileCase{
-				note: "ヘルス状態の取得に失敗した場合は monitorID と失敗 Condition を status に保存し、Reconcile error は返さない",
-				setup: func() (reconcile.Request, *fakeSimpleMonitorClient) {
-					resource := createTestMonitor(ctx, "health-error-resource")
-					return reconcile.Request{NamespacedName: clientKey(resource)}, &fakeSimpleMonitorClient{
-						createID:  "123456789012",
-						healthErr: errors.New("health status unavailable"),
-					}
-				},
-				wantErr: expectNoReconcileError,
-				verify: func(_ reconcile.Result, fakeSakura *fakeSimpleMonitorClient) {
-					Expect(fakeSakura.healthReads).To(Equal([]string{"123456789012"}))
-					fetched := getTestMonitor(ctx, "health-error-resource")
-					Expect(fetched.Status.MonitorID).To(Equal("123456789012"))
-					Expect(fetched.Status.ObservedGeneration).To(Equal(fetched.Generation))
-					condition := findCondition(fetched.Status.Conditions, conditionTypeSynced)
-					Expect(condition).NotTo(BeNil())
-					Expect(condition.Status).To(Equal(metav1.ConditionFalse))
-					Expect(condition.Message).To(ContainSubstring("health status unavailable"))
 				},
 			}),
 			// 同期済み generation は status-only update の再リコンサイルでも SakuraCloud API に触らない。
@@ -189,7 +161,6 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(fakeSakura.checks[0].id).To(Equal("123456789012"))
 					Expect(fakeSakura.creates).To(BeEmpty())
 					Expect(fakeSakura.updates).To(BeEmpty())
-					Expect(fakeSakura.healthReads).To(BeEmpty())
 
 					fetched := getTestMonitor(ctx, "verification-due-resource")
 					Expect(fetched.Status.LastSyncedAt).NotTo(BeNil())
@@ -283,15 +254,12 @@ type fakeSimpleMonitorClient struct {
 	createErr error
 	checkErr  error
 	updateErr error
-	health    monitoringv1alpha1.HealthStatus
-	healthErr error
 	creates   []simplemonitor.SimpleMonitorDesired
 	checks    []struct {
 		id      string
 		desired simplemonitor.SimpleMonitorDesired
 	}
-	healthReads []string
-	updates     []struct {
+	updates []struct {
 		id      string
 		desired simplemonitor.SimpleMonitorDesired
 	}
@@ -324,19 +292,8 @@ func (f *fakeSimpleMonitorClient) Update(_ context.Context, id string, desired s
 	return f.updateErr
 }
 
-func (f *fakeSimpleMonitorClient) HealthStatus(_ context.Context, id string) (monitoringv1alpha1.HealthStatus, error) {
-	f.healthReads = append(f.healthReads, id)
-	if f.healthErr != nil {
-		return monitoringv1alpha1.HealthStatusUnknown, f.healthErr
-	}
-	if f.health == "" {
-		return monitoringv1alpha1.HealthStatusHealthy, nil
-	}
-	return f.health, nil
-}
-
 func (f *fakeSimpleMonitorClient) called() bool {
-	return len(f.creates) > 0 || len(f.checks) > 0 || len(f.updates) > 0 || len(f.healthReads) > 0
+	return len(f.creates) > 0 || len(f.checks) > 0 || len(f.updates) > 0
 }
 
 func newTestReconciler(simpleMonitorClient simplemonitor.SimpleMonitorClient) *SakuraSimpleMonitorReconciler {
