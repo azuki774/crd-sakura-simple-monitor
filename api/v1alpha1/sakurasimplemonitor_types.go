@@ -12,15 +12,6 @@ const (
 	HealthCheckProtocolHTTPS HealthCheckProtocol = "https"
 )
 
-// HealthStatus is the summarized monitor health reported in status.
-type HealthStatus string
-
-const (
-	HealthStatusUnknown    HealthStatus = "Unknown"
-	HealthStatusHealthy    HealthStatus = "Healthy"
-	HealthStatusNotHealthy HealthStatus = "NotHealthy"
-)
-
 // HealthCheckSpec defines the monitor probe settings.
 type HealthCheckSpec struct {
 	// Protocol is limited to HTTP-based checks in the initial implementation.
@@ -105,10 +96,6 @@ type SakuraSimpleMonitorStatus struct {
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Health is the summarized monitor health reported by SakuraCloud.
-	// +kubebuilder:validation:Enum=Unknown;Healthy;NotHealthy
-	Health HealthStatus `json:"health,omitempty"`
-
 	// LastSyncedAt is the latest successful synchronization timestamp.
 	LastSyncedAt *metav1.Time `json:"lastSyncedAt,omitempty"`
 }
@@ -117,7 +104,6 @@ type SakuraSimpleMonitorStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=sakurasimplemonitors,scope=Namespaced,singular=sakurasimplemonitor
 // +kubebuilder:printcolumn:name="Target",type="string",JSONPath=".spec.target"
-// +kubebuilder:printcolumn:name="Health",type="string",JSONPath=".status.health"
 // +kubebuilder:printcolumn:name="MonitorID",type="string",JSONPath=".status.monitorID"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

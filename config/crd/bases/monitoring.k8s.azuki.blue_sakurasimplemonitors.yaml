@@ -18,9 +18,6 @@ spec:
     - jsonPath: .spec.target
       name: Target
       type: string
-    - jsonPath: .status.health
-      name: Health
-      type: string
     - jsonPath: .status.monitorID
       name: MonitorID
       type: string
@@ -208,13 +205,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              health:
-                description: Health is the summarized monitor health reported by SakuraCloud.
-                enum:
-                - Unknown
-                - Healthy
-                - NotHealthy
-                type: string
               lastSyncedAt:
                 description: LastSyncedAt is the latest successful synchronization
                   timestamp.
