@@ -52,6 +52,7 @@ jobs:
             echo "tags<<EOF"
             if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
               echo "${IMAGE_NAME}:${GITHUB_REF_NAME}"
+              echo "${IMAGE_NAME}:latest"
             else
               echo "${IMAGE_NAME}:latest"
               echo "${IMAGE_NAME}:${GITHUB_SHA}"
