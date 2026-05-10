@@ -163,6 +163,24 @@ func (c *Client) Update(ctx context.Context, id string, desired SimpleMonitorDes
 	return err
 }
 
+func (c *Client) Delete(ctx context.Context, id string) error {
+	logger := log.FromContext(ctx).WithName("sakura-simple-monitor")
+	logger.Info("deleting SakuraCloud simple monitor", "monitorID", id)
+
+	err := c.op.Delete(ctx, types.StringID(id))
+	if iaas.IsNotFoundError(err) {
+		logger.Info("SakuraCloud simple monitor was not found during delete", "monitorID", id)
+		return ErrSimpleMonitorNotFound
+	}
+	if err != nil {
+		logSakuraAPIError(logger, "delete", err)
+		return err
+	}
+
+	logger.Info("deleted SakuraCloud simple monitor", "monitorID", id)
+	return nil
+}
+
 func (d SimpleMonitorDesired) toCreateRequest() *iaas.SimpleMonitorCreateRequest {
 	return &iaas.SimpleMonitorCreateRequest{
 		Target:             d.Target,
