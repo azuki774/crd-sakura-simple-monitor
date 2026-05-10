@@ -68,6 +68,7 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(condition).NotTo(BeNil())
 					Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 					Expect(condition.Reason).To(Equal(syncReasonSucceeded))
+					Expect(fetched.Finalizers).To(ContainElement(sakuraSimpleMonitorFinalizer))
 				},
 			}),
 			// status.monitorID がある未処理 generation の CR は、事前 Read せず、その ID のまま更新する。
@@ -222,27 +223,79 @@ var _ = Describe("SakuraSimpleMonitor Controller", func() {
 					Expect(fakeSakura.called()).To(BeFalse())
 				},
 			}),
-			// DeletionTimestamp が付いた CR は Create/Update only の範囲外なので、外部 API を呼ばない。
-			Entry("does not call SakuraCloud API for deleting resources", reconcileCase{
-				note: "削除中 CR は初回実装の同期対象外として扱い、SakuraCloud API を呼ばない",
+			// 削除中 CR は finalizer で Sakura 側リソースの削除完了まで保持する。
+			Entry("deletes the SakuraCloud simple monitor for deleting resources", reconcileCase{
+				note: "削除中 CR の status.monitorID を使って SakuraCloud シンプル監視を削除し、成功したら finalizer を外す",
 				setup: func() (reconcile.Request, *fakeSimpleMonitorClient) {
 					resource := createTestMonitor(ctx, "deleting-resource")
-					resource.Finalizers = []string{"test.monitoring.k8s.azuki.blue/finalizer"}
-					Expect(k8sClient.Update(ctx, resource)).To(Succeed())
-					Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-					DeferCleanup(func() {
-						current := &monitoringv1alpha1.SakuraSimpleMonitor{}
-						if err := k8sClient.Get(ctx, clientKey(resource), current); apierrors.IsNotFound(err) {
-							return
-						}
-						current.Finalizers = nil
-						Expect(k8sClient.Update(ctx, current)).To(Succeed())
-					})
+					setMonitorID(ctx, resource, "123456789012")
+					markDeleting(ctx, resource)
 					return reconcile.Request{NamespacedName: clientKey(resource)}, &fakeSimpleMonitorClient{}
 				},
 				wantErr: expectNoReconcileError,
-				verify: func(_ reconcile.Result, fakeSakura *fakeSimpleMonitorClient) {
+				verify: func(result reconcile.Result, fakeSakura *fakeSimpleMonitorClient) {
+					Expect(result.Requeue).To(BeFalse())
+					Expect(result.RequeueAfter).To(BeZero())
+					Expect(fakeSakura.deletes).To(Equal([]string{"123456789012"}))
+					expectMonitorDeleted(ctx, types.NamespacedName{Name: "deleting-resource", Namespace: "default"})
+				},
+			}),
+			Entry("removes the finalizer when the SakuraCloud simple monitor was already deleted", reconcileCase{
+				note: "SakuraCloud 側で削除済みの場合は not found を成功扱いにして finalizer を外す",
+				setup: func() (reconcile.Request, *fakeSimpleMonitorClient) {
+					resource := createTestMonitor(ctx, "deleting-not-found-resource")
+					setMonitorID(ctx, resource, "123456789012")
+					markDeleting(ctx, resource)
+					return reconcile.Request{NamespacedName: clientKey(resource)}, &fakeSimpleMonitorClient{
+						deleteErr: simplemonitor.ErrSimpleMonitorNotFound,
+					}
+				},
+				wantErr: expectNoReconcileError,
+				verify: func(result reconcile.Result, fakeSakura *fakeSimpleMonitorClient) {
+					Expect(result.Requeue).To(BeFalse())
+					Expect(result.RequeueAfter).To(BeZero())
+					Expect(fakeSakura.deletes).To(Equal([]string{"123456789012"}))
+					expectMonitorDeleted(ctx, types.NamespacedName{Name: "deleting-not-found-resource", Namespace: "default"})
+				},
+			}),
+			Entry("records a delete failure condition and retries after four hours", reconcileCase{
+				note: "SakuraCloud DELETE が失敗した場合は Reconcile error を返さず、4 時間後にだけ再試行する",
+				setup: func() (reconcile.Request, *fakeSimpleMonitorClient) {
+					resource := createTestMonitor(ctx, "delete-error-resource")
+					setMonitorID(ctx, resource, "123456789012")
+					markDeleting(ctx, resource)
+					return reconcile.Request{NamespacedName: clientKey(resource)}, &fakeSimpleMonitorClient{
+						deleteErr: errors.New("sakura api unavailable"),
+					}
+				},
+				wantErr: expectNoReconcileError,
+				verify: func(result reconcile.Result, fakeSakura *fakeSimpleMonitorClient) {
+					Expect(result.Requeue).To(BeFalse())
+					Expect(result.RequeueAfter).To(Equal(deleteRetryInterval))
+					Expect(fakeSakura.deletes).To(Equal([]string{"123456789012"}))
+
+					fetched := getTestMonitor(ctx, "delete-error-resource")
+					Expect(fetched.Finalizers).To(ContainElement(sakuraSimpleMonitorFinalizer))
+					condition := findCondition(fetched.Status.Conditions, conditionTypeSynced)
+					Expect(condition).NotTo(BeNil())
+					Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+					Expect(condition.Reason).To(Equal(syncReasonDeleteFailed))
+					Expect(condition.Message).To(ContainSubstring("sakura api unavailable"))
+				},
+			}),
+			Entry("removes the finalizer without a SakuraCloud API call when monitor ID is empty", reconcileCase{
+				note: "status.monitorID が空の削除中 CR は外部 ID を特定できないため API を呼ばず finalizer を外す",
+				setup: func() (reconcile.Request, *fakeSimpleMonitorClient) {
+					resource := createTestMonitor(ctx, "delete-empty-id-resource")
+					markDeleting(ctx, resource)
+					return reconcile.Request{NamespacedName: clientKey(resource)}, &fakeSimpleMonitorClient{}
+				},
+				wantErr: expectNoReconcileError,
+				verify: func(result reconcile.Result, fakeSakura *fakeSimpleMonitorClient) {
+					Expect(result.Requeue).To(BeFalse())
+					Expect(result.RequeueAfter).To(BeZero())
 					Expect(fakeSakura.called()).To(BeFalse())
+					expectMonitorDeleted(ctx, types.NamespacedName{Name: "delete-empty-id-resource", Namespace: "default"})
 				},
 			}),
 		)
@@ -254,6 +307,7 @@ type fakeSimpleMonitorClient struct {
 	createErr error
 	checkErr  error
 	updateErr error
+	deleteErr error
 	creates   []simplemonitor.SimpleMonitorDesired
 	checks    []struct {
 		id      string
@@ -263,6 +317,7 @@ type fakeSimpleMonitorClient struct {
 		id      string
 		desired simplemonitor.SimpleMonitorDesired
 	}
+	deletes []string
 }
 
 func (f *fakeSimpleMonitorClient) Create(_ context.Context, desired simplemonitor.SimpleMonitorDesired) (string, error) {
@@ -292,8 +347,13 @@ func (f *fakeSimpleMonitorClient) Update(_ context.Context, id string, desired s
 	return f.updateErr
 }
 
+func (f *fakeSimpleMonitorClient) Delete(_ context.Context, id string) error {
+	f.deletes = append(f.deletes, id)
+	return f.deleteErr
+}
+
 func (f *fakeSimpleMonitorClient) called() bool {
-	return len(f.creates) > 0 || len(f.checks) > 0 || len(f.updates) > 0
+	return len(f.creates) > 0 || len(f.checks) > 0 || len(f.updates) > 0 || len(f.deletes) > 0
 }
 
 func newTestReconciler(simpleMonitorClient simplemonitor.SimpleMonitorClient) *SakuraSimpleMonitorReconciler {
@@ -362,6 +422,22 @@ func setMonitorID(ctx context.Context, resource *monitoringv1alpha1.SakuraSimple
 	Expect(k8sClient.Status().Update(ctx, current)).To(Succeed())
 }
 
+func markDeleting(ctx context.Context, resource *monitoringv1alpha1.SakuraSimpleMonitor) {
+	current := &monitoringv1alpha1.SakuraSimpleMonitor{}
+	Expect(k8sClient.Get(ctx, clientKey(resource), current)).To(Succeed())
+	current.Finalizers = append(current.Finalizers, sakuraSimpleMonitorFinalizer)
+	Expect(k8sClient.Update(ctx, current)).To(Succeed())
+	Expect(k8sClient.Delete(ctx, current)).To(Succeed())
+	DeferCleanup(func() {
+		current := &monitoringv1alpha1.SakuraSimpleMonitor{}
+		if err := k8sClient.Get(ctx, clientKey(resource), current); apierrors.IsNotFound(err) {
+			return
+		}
+		current.Finalizers = nil
+		Expect(k8sClient.Update(ctx, current)).To(Succeed())
+	})
+}
+
 func setSyncStatus(
 	ctx context.Context,
 	resource *monitoringv1alpha1.SakuraSimpleMonitor,
@@ -408,6 +484,12 @@ func getTestMonitor(ctx context.Context, name string) *monitoringv1alpha1.Sakura
 
 func expectNoReconcileError(err error) {
 	Expect(err).NotTo(HaveOccurred())
+}
+
+func expectMonitorDeleted(ctx context.Context, key types.NamespacedName) {
+	current := &monitoringv1alpha1.SakuraSimpleMonitor{}
+	err := k8sClient.Get(ctx, key, current)
+	Expect(apierrors.IsNotFound(err)).To(BeTrue())
 }
 
 func clientKey(resource *monitoringv1alpha1.SakuraSimpleMonitor) types.NamespacedName {

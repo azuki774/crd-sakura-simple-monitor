@@ -12,6 +12,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -20,12 +22,16 @@ import (
 )
 
 const (
+	sakuraSimpleMonitorFinalizer = "sakurasimplemonitor.monitoring.k8s.azuki.blue/finalizer"
+
 	conditionTypeSynced = "Synced"
 
-	syncReasonSucceeded = "SyncSucceeded"
-	syncReasonFailed    = "SyncFailed"
+	syncReasonSucceeded    = "SyncSucceeded"
+	syncReasonFailed       = "SyncFailed"
+	syncReasonDeleteFailed = "DeleteFailed"
 
 	syncVerificationInterval = 24 * time.Hour
+	deleteRetryInterval      = 4 * time.Hour
 )
 
 // SakuraSimpleMonitorReconciler reconciles a SakuraSimpleMonitor object
@@ -54,7 +60,11 @@ func (r *SakuraSimpleMonitorReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	if !monitor.DeletionTimestamp.IsZero() {
 		logger.Info("resource is deleting", "name", monitor.Name, "namespace", monitor.Namespace)
-		return ctrl.Result{}, nil
+		return r.reconcileDelete(ctx, monitor)
+	}
+
+	if err := r.ensureFinalizer(ctx, monitor); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	desired := desiredSimpleMonitor(monitor)
@@ -105,9 +115,86 @@ func (r *SakuraSimpleMonitorReconciler) Reconcile(ctx context.Context, req ctrl.
 // SetupWithManager sets up the controller with the Manager.
 func (r *SakuraSimpleMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&monitoringv1alpha1.SakuraSimpleMonitor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&monitoringv1alpha1.SakuraSimpleMonitor{}, builder.WithPredicates(predicate.Or(
+			predicate.GenerationChangedPredicate{},
+			deleteTimestampChangedPredicate{},
+		))).
 		Named("sakurasimplemonitor").
 		Complete(r)
+}
+
+func (r *SakuraSimpleMonitorReconciler) ensureFinalizer(
+	ctx context.Context,
+	monitor *monitoringv1alpha1.SakuraSimpleMonitor,
+) error {
+	if controllerutil.ContainsFinalizer(monitor, sakuraSimpleMonitorFinalizer) {
+		return nil
+	}
+
+	before := monitor.DeepCopy()
+	controllerutil.AddFinalizer(monitor, sakuraSimpleMonitorFinalizer)
+	return r.Patch(ctx, monitor, client.MergeFrom(before))
+}
+
+func (r *SakuraSimpleMonitorReconciler) reconcileDelete(
+	ctx context.Context,
+	monitor *monitoringv1alpha1.SakuraSimpleMonitor,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if !controllerutil.ContainsFinalizer(monitor, sakuraSimpleMonitorFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	monitorID := monitor.Status.MonitorID
+	if monitorID == "" {
+		logger.Info("skip deleting SakuraCloud simple monitor because monitorID is empty")
+		return ctrl.Result{}, r.removeFinalizer(ctx, monitor)
+	}
+
+	if r.SakuraSimpleMonitor == nil {
+		err := errors.New("sakura simple monitor client is not configured")
+		logger.Error(err, "failed to delete SakuraCloud simple monitor", "monitorID", monitorID)
+		if statusErr := r.setDeleteFailed(ctx, monitor, err); statusErr != nil {
+			logger.Error(statusErr, "failed to record SakuraCloud simple monitor deletion failure", "monitorID", monitorID)
+		}
+		return ctrl.Result{RequeueAfter: deleteRetryInterval}, nil
+	}
+
+	if err := r.SakuraSimpleMonitor.Delete(ctx, monitorID); err != nil {
+		if errors.Is(err, simplemonitor.ErrSimpleMonitorNotFound) {
+			logger.Info("SakuraCloud simple monitor is already deleted", "monitorID", monitorID)
+			return ctrl.Result{}, r.removeFinalizer(ctx, monitor)
+		}
+
+		logger.Error(err, "failed to delete SakuraCloud simple monitor", "monitorID", monitorID)
+		if statusErr := r.setDeleteFailed(ctx, monitor, err); statusErr != nil {
+			logger.Error(statusErr, "failed to record SakuraCloud simple monitor deletion failure", "monitorID", monitorID)
+		}
+		return ctrl.Result{RequeueAfter: deleteRetryInterval}, nil
+	}
+
+	logger.Info("deleted SakuraCloud simple monitor for deleting resource", "monitorID", monitorID)
+	return ctrl.Result{}, r.removeFinalizer(ctx, monitor)
+}
+
+func (r *SakuraSimpleMonitorReconciler) removeFinalizer(
+	ctx context.Context,
+	monitor *monitoringv1alpha1.SakuraSimpleMonitor,
+) error {
+	before := monitor.DeepCopy()
+	controllerutil.RemoveFinalizer(monitor, sakuraSimpleMonitorFinalizer)
+	return r.Patch(ctx, monitor, client.MergeFrom(before))
+}
+
+type deleteTimestampChangedPredicate struct {
+	predicate.Funcs
+}
+
+func (deleteTimestampChangedPredicate) Update(e event.UpdateEvent) bool {
+	if e.ObjectOld == nil || e.ObjectNew == nil {
+		return false
+	}
+	return e.ObjectOld.GetDeletionTimestamp().IsZero() && !e.ObjectNew.GetDeletionTimestamp().IsZero()
 }
 
 func desiredSimpleMonitor(monitor *monitoringv1alpha1.SakuraSimpleMonitor) simplemonitor.SimpleMonitorDesired {
@@ -237,6 +324,25 @@ func (r *SakuraSimpleMonitorReconciler) setSyncFailed(
 		if monitorID != "" {
 			status.MonitorID = monitorID
 		}
+		status.ObservedGeneration = monitor.Generation
+		meta.SetStatusCondition(&status.Conditions, condition)
+	})
+}
+
+func (r *SakuraSimpleMonitorReconciler) setDeleteFailed(
+	ctx context.Context,
+	monitor *monitoringv1alpha1.SakuraSimpleMonitor,
+	deleteErr error,
+) error {
+	condition := metav1.Condition{
+		Type:               conditionTypeSynced,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: monitor.Generation,
+		Reason:             syncReasonDeleteFailed,
+		Message:            deleteErr.Error(),
+	}
+
+	return r.patchStatus(ctx, monitor, func(status *monitoringv1alpha1.SakuraSimpleMonitorStatus) {
 		status.ObservedGeneration = monitor.Generation
 		meta.SetStatusCondition(&status.Conditions, condition)
 	})

@@ -3,6 +3,7 @@ package simplemonitor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -138,6 +139,42 @@ func TestClientCheckSyncedReadsEndpointAndAcceptsMatchingMonitor(t *testing.T) {
 	}
 	if caller.body != nil {
 		t.Fatalf("CheckSynced() body = %#v, want nil", caller.body)
+	}
+}
+
+func TestClientDeleteUsesSDKCommonServiceItemEndpoint(t *testing.T) {
+	caller := &recordingAPICaller{}
+	client := NewClient(caller)
+
+	err := client.Delete(context.Background(), "123456789012")
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if caller.method != http.MethodDelete {
+		t.Fatalf("Delete() method = %q, want %q", caller.method, http.MethodDelete)
+	}
+	wantURI := iaas.SakuraCloudAPIRoot + "/is1a/api/cloud/1.1/commonserviceitem/123456789012"
+	if caller.uri != wantURI {
+		t.Fatalf("Delete() uri = %q, want %q", caller.uri, wantURI)
+	}
+	if caller.body != nil {
+		t.Fatalf("Delete() body = %#v, want nil", caller.body)
+	}
+}
+
+func TestClientDeleteReturnsSimpleMonitorNotFound(t *testing.T) {
+	caller := &recordingAPICaller{
+		err: iaas.NewAPIError(http.MethodDelete, nil, http.StatusNotFound, &iaas.APIErrorResponse{
+			Status:       "404 NotFound",
+			ErrorCode:    "not_found",
+			ErrorMessage: "not found",
+		}),
+	}
+	client := NewClient(caller)
+
+	err := client.Delete(context.Background(), "123456789012")
+	if !errors.Is(err, ErrSimpleMonitorNotFound) {
+		t.Fatalf("Delete() error = %v, want %v", err, ErrSimpleMonitorNotFound)
 	}
 }
 
